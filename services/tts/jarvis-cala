@@ -1,0 +1,40 @@
+#!/bin/bash
+# jarvis-cala: interrompe o Jarvis e LIMPA A FILA de falas. Único ponto de interrupção.
+#   1. grava um token novo no marcador de cancelamento (fala.cancel): toda fala que entrou na fila
+#      antes deste instante (fala-kokoro.sh/jarvis-fala, speak do MCP) ao conseguir o lock vê o
+#      marcador mudado, não toca e registra motor=descartada no fala.log;
+#   2. encerra (SIGTERM) a fala em curso: o lockf que segura o lock e tudo que desce dele (script,
+#      afplay, say, curl). Quem só espera na fila (lockf sem filhos) não é morto, para registrar o
+#      descarte; falas que entram depois tocam normalmente.
+# Não mexe no que a Escuta ouve. Imprime uma linha "pid comando" por processo encerrado.
+# Ambiente: JARVIS_FALA_LOCK (ou AI_VOICE_MAC_LOCK), JARVIS_FALA_CANCEL (padrão: fala.cancel ao
+# lado do lock). Ganchos: barge-in da Escuta (Speaker.stop), atalho, botão do dashboard, app bar.
+set -u
+LOCK="${JARVIS_FALA_LOCK:-${AI_VOICE_MAC_LOCK:-$HOME/.local/share/jarvis/fala.lock}}"
+CANCEL="${JARVIS_FALA_CANCEL:-$(dirname "$LOCK")/fala.cancel}"
+mkdir -p "$(dirname "$CANCEL")"
+
+# O marcador primeiro: quando a fala em curso morrer e o lock soltar, o próximo já vê o cancelamento.
+TOKEN="$(date +%s).$$.$RANDOM$RANDOM"
+printf '%s\n' "$TOKEN" >"$CANCEL.$$" && mv -f "$CANCEL.$$" "$CANCEL"
+
+[ -e "$LOCK" ] || exit 0
+# Donos do lock: lockf com filhos (quem espera na fila não tem filho). Os outros processos que
+# abrem o arquivo (a Escuta confere o lock de 50 em 50 ms) são ignorados.
+HOLDERS=""
+pid=""
+while IFS= read -r l; do
+  case "$l" in
+    p*) pid="${l#p}" ;;
+    c*) [ "${l#c}" = "lockf" ] && /usr/bin/pgrep -P "$pid" >/dev/null 2>&1 && HOLDERS="$HOLDERS $pid" ;;
+  esac
+done < <(/usr/sbin/lsof -F pc -- "$LOCK" 2>/dev/null)
+[ -n "$HOLDERS" ] || exit 0
+
+desc() { for p in $1; do for c in $(/usr/bin/pgrep -P "$p"); do echo "$c"; desc "$c"; done; done; }
+ALL="$(for h in $HOLDERS; do echo "$h"; desc "$h"; done | sort -rn | uniq)"
+for p in $ALL; do
+  cmd="$(/bin/ps -o comm= -p "$p" 2>/dev/null | head -1)"
+  kill -TERM "$p" 2>/dev/null && echo "$p ${cmd##*/}"
+done
+exit 0

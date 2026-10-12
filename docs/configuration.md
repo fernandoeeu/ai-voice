@@ -37,6 +37,15 @@ On a Mac, `scripts/setup.sh` keeps the values it installs with in `~/.config/jar
 | `JARVIS_TTS_SPEED` | `1.15` | Speech speed used when a request sends no `speed`, between 0.5 and 2.0. |
 | `JARVIS_TTS_HOME` | `~/.local/share/jarvis/tts` | Where `services/tts/install.sh` installs the server, and where `jarvis-fala` looks for `fala-kokoro.sh`. |
 
+### Interrupting speech and clearing the queue
+
+`jarvis-cala` (source `services/tts/jarvis-cala`, installed to `~/.local/bin` by `services/tts/install.sh`) is the single interruption point. It writes a new token to the cancel marker, then sends SIGTERM to the speech playing now (the `lockf` holding the lock and its children). Every speech records the marker before waiting for the lock (`fala-kokoro.sh`, and `speak` of the MCP server); when it gets the lock and the marker changed, it does not play and logs `motor=descartada ... motivo=interrompida` in `fala.log`. Speeches that enter after the interruption play normally. Everything that interrupts speech must call `jarvis-cala`: the Escuta barge-in, keyboard shortcuts, the dashboard button and the app bar. It never touches what the Escuta hears.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `JARVIS_FALA_LOCK` | `~/.local/share/jarvis/fala.lock` | Speech lock. Takes precedence over `AI_VOICE_MAC_LOCK` in `fala-kokoro.sh`, `jarvis-cala` and the MCP server. |
+| `JARVIS_FALA_CANCEL` | `fala.cancel` next to the lock | Cancel marker file. |
+
 `GET /health` answers 200 once the model is loaded and warmed up, `GET /voices` lists the voices, and `POST /synthesize` takes `{"text", "voice", "speed"}` (up to 4000 characters, speed 0.5 to 2.0) and returns a WAV.
 
 ## Commands

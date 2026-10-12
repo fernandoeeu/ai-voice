@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Instala ou atualiza o servidor local de voz (Kokoro-82M via mlx-audio) em $JARVIS_TTS_HOME
-# (padrão ~/.local/share/jarvis/tts): copia server.py, normaliza.py e fala-kokoro.sh, cria o venv Python com as
+# (padrão ~/.local/share/jarvis/tts): copia server.py, normaliza.py e fala-kokoro.sh (e o jarvis-cala em ~/.local/bin), cria o venv Python com as
 # versões travadas em requirements.lock.txt e baixa o modelo com só as vozes pt-BR (~330 MB).
 #
 # Idempotente: o venv só é refeito quando o lock muda, e o modelo só é baixado se faltar.
@@ -57,6 +57,10 @@ for f in server.py normaliza.py requirements.lock.txt; do
 	cmp -s "$SRC/$f" "$TTS_HOME/$f" 2>/dev/null || run install -m 644 "$SRC/$f" "$TTS_HOME/$f"
 done
 cmp -s "$SRC/fala-kokoro.sh" "$TTS_HOME/fala-kokoro.sh" 2>/dev/null || run install -m 755 "$SRC/fala-kokoro.sh" "$TTS_HOME/fala-kokoro.sh"
+# jarvis-cala: o comando único que interrompe a fala e limpa a fila (fica no PATH, ao lado do jarvis-fala).
+BIN_DIR="${JARVIS_BIN_DIR:-$HOME/.local/bin}"
+run mkdir -p "$BIN_DIR"
+cmp -s "$SRC/jarvis-cala" "$BIN_DIR/jarvis-cala" 2>/dev/null || run install -m 755 "$SRC/jarvis-cala" "$BIN_DIR/jarvis-cala"
 
 LOCK_SUM="$(shasum -a 256 "$SRC/requirements.lock.txt" | cut -d' ' -f1)"
 STAMP="$VENV/.jarvis-lock.sha256"
