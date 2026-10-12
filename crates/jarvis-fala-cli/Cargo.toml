@@ -1,0 +1,20 @@
+[package]
+name = "jarvis-fala-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Cliente fino jarvis-fala-rs (esqueleto)"
+
+[lints]
+workspace = true
+
+[dependencies]
+jarvis-protocolo.workspace = true
+anyhow.workspace = true
+clap.workspace = true
+tokio.workspace = true
+
+[[bin]]
+name = "jarvis-fala-rs"
+path = "src/main.rs"

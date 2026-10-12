@@ -1,0 +1,18 @@
+[package]
+name = "jarvisd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Daemon residente do Jarvis (esqueleto)"
+
+[lints]
+workspace = true
+
+[dependencies]
+jarvis-protocolo.workspace = true
+jarvis-fala.workspace = true
+jarvis-herdr.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+tracing.workspace = true
