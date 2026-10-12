@@ -31,6 +31,15 @@ const HEALTH_POLL = Duration.seconds(1)
 const FORCE_KILL_AFTER = Duration.seconds(2)
 // lockf(1) exit status when the timeout expires before the lock is free (sysexits EX_TEMPFAIL).
 const EX_TEMPFAIL = 75
+// Exit status of the guard below when `jarvis-cala` rewrote the cancel marker while this speech waited in the queue.
+export const EX_CANCELLED = 76
+// lockf exits 70 (EX_SOFTWARE) when the player dies on a signal; 143 is SIGTERM seen directly. Both mean `jarvis-cala` stopped the speech.
+const STOPPED_CODES: ReadonlyArray<number> = [70, 143]
+/**
+ * Runs under the lock, before the player: `$1` is the cancel marker, `$2` the content it had when
+ * the speech entered the queue. A different content means `jarvis-cala` ran since then.
+ */
+export const CANCEL_GUARD = `[ "$(cat "$1" 2>/dev/null)" = "$2" ] || exit ${EX_CANCELLED}; shift 2; exec "$@"`
 // A WAV file starts with a 44-byte RIFF header.
 const WAV_HEADER_LENGTH = 44
 
@@ -96,15 +105,28 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
    * same file (such as `jarvis-fala`), then runs the player holding the lock until it exits. `-k`
    * keeps the file, because removing it would let a waiting process lock a deleted inode.
    */
-  const locked = (player: ReadonlyArray<string>) =>
+  const cancelFile = config.cancel ?? path.join(path.dirname(config.lock), "fala.cancel")
+  const locked = (player: ReadonlyArray<string>, entry: string) =>
     ChildProcess.make(
       LOCKF,
-      ["-k", "-t", String(Duration.toSeconds(QUEUE_TIMEOUT)), config.lock, ...player],
+      [
+        "-k",
+        "-t",
+        String(Duration.toSeconds(QUEUE_TIMEOUT)),
+        config.lock,
+        "/bin/sh",
+        "-c",
+        CANCEL_GUARD,
+        "sh",
+        cancelFile,
+        entry,
+        ...player
+      ],
       { stdin: "ignore", stdout: "ignore", stderr: "ignore", forceKillAfter: FORCE_KILL_AFTER }
     )
 
   // `--` keeps a text that starts with `-` from being read as an option.
-  const sayCommand = (text: string) =>
+  const sayCommand = (text: string, entry: string) =>
     locked([
       SAY,
       "-v",
@@ -112,7 +134,13 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
       ...(options.audioFile === undefined ? [] : ["-o", options.audioFile]),
       "--",
       text
-    ])
+    ], entry)
+
+  /** The cancel marker as the speech sees it when it enters the queue (empty when absent). */
+  const readCancel = fs.readFileString(cancelFile).pipe(
+    Effect.map((content) => content.trim()),
+    Effect.orElseSucceed(() => "")
+  )
 
   /**
    * One POST to the local TTS server. Any failure (unreachable, HTTP error, not a WAV, more than
@@ -150,7 +178,12 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
 
   // A single attempt. The process lives only inside exitCode's scope: on timeout or
   // interruption the spawner kills its process group, lockf and the player included.
-  const play = Effect.fnUntraced(function*(command: ChildProcess.Command, player: string, text: string) {
+  const play = Effect.fnUntraced(function*(
+    command: ChildProcess.Command,
+    player: string,
+    text: string,
+    stopped: { reason?: "descartada" | "interrompida" }
+  ) {
     const timeout = speechTimeout(text)
     const code = yield* spawner.exitCode(command).pipe(
       Effect.catchTag("PlatformError", () => fail(`Could not run ${LOCKF} ${player}. Nothing was spoken.`)),
@@ -163,6 +196,17 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
           )
       })
     )
+    if (code === EX_CANCELLED) {
+      stopped.reason = "descartada"
+      return yield* fail(
+        "Fala descartada: o Jarvis foi interrompido (jarvis-cala) enquanto ela esperava na fila. " +
+          "Nothing was spoken; do not retry automatically."
+      )
+    }
+    if (STOPPED_CODES.includes(code)) {
+      stopped.reason = "interrompida"
+      return yield* fail("Fala interrompida (jarvis-cala) durante a reprodução. Do not retry automatically.")
+    }
     if (code === EX_TEMPFAIL) {
       return yield* fail(
         `Mac ocupado: another program kept speaking for ${Duration.format(QUEUE_TIMEOUT)}. ` +
@@ -178,14 +222,14 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
     }
   })
 
-  const playWav = (wav: Uint8Array, text: string) =>
+  const playWav = (wav: Uint8Array, text: string, entry: string, stopped: { reason?: "descartada" | "interrompida" }) =>
     Effect.scoped(Effect.gen(function*() {
       // Deleted when the scope closes, after afplay exited or was killed.
       const file = yield* fs.makeTempFileScoped({ prefix: "jarvis-tts-", suffix: ".wav" }).pipe(
         Effect.tap((file) => fs.writeFile(file, wav)),
         Effect.catchTag("PlatformError", () => fail("Could not write the synthesized audio. Nothing was spoken."))
       )
-      yield* play(locked([AFPLAY, file]), AFPLAY, text)
+      yield* play(locked([AFPLAY, file], entry), AFPLAY, text, stopped)
     }))
 
   const healthy: Effect.Effect<boolean> = client.execute(
@@ -260,6 +304,9 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
     )
     // Synthesis runs before taking the lock, so the lock is held only while audio plays.
     const start = yield* Clock.currentTimeMillis
+    // Enter the queue: a `jarvis-cala` after this instant cancels this speech, even during synthesis.
+    const entry = yield* readCancel
+    const stopped: { reason?: "descartada" | "interrompida" } = {}
     let wav: Option.Option<Uint8Array> = yield* synthesize(text)
     let motivo: string | undefined
     if (Option.isNone(wav)) {
@@ -282,18 +329,20 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
     yield* Metric.update(Metric.withAttributes(timeToAudio, { motor }), (yield* Clock.currentTimeMillis) - start)
     const audioSeconds = Option.isSome(wav) ? Math.floor((wav.value.length - WAV_HEADER_LENGTH) / 48000) : "?"
     const playback: Effect.Effect<void, MacVoiceError> = Option.isSome(wav)
-      ? playWav(wav.value, text)
-      : play(sayCommand(text), SAY, text)
+      ? playWav(wav.value, text, entry, stopped)
+      : play(sayCommand(text, entry), SAY, text, stopped)
     yield* playback.pipe(
       Effect.onExit((exit) =>
-        record({
-          motor,
-          chars: text.length,
-          audioSeconds,
-          rc: Exit.isSuccess(exit) ? 0 : Exit.hasInterrupts(exit) ? 143 : 1,
-          start,
-          motivo
-        })
+        stopped.reason === "descartada"
+          ? record({ motor: "descartada", chars: text.length, audioSeconds: 0, rc: 0, start, motivo: "interrompida" })
+          : record({
+            motor,
+            chars: text.length,
+            audioSeconds,
+            rc: Exit.isSuccess(exit) ? 0 : stopped.reason === "interrompida" || Exit.hasInterrupts(exit) ? 143 : 1,
+            start,
+            motivo
+          })
       )
     )
     yield* Metric.update(Metric.withAttributes(speechDuration, { motor }), (yield* Clock.currentTimeMillis) - start)

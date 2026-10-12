@@ -4,7 +4,7 @@ import { PlatformError, SystemError } from "effect/PlatformError"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
-import { AFPLAY, LAUNCHCTL, LOCKF, MacVoice, MacVoiceConfig, QUEUE_TIMEOUT, SAY, speechTimeout, SYNTHESIS_TIMEOUT } from "../src/index.ts"
+import { AFPLAY, CANCEL_GUARD, LAUNCHCTL, LOCKF, MacVoice, MacVoiceConfig, QUEUE_TIMEOUT, SAY, speechTimeout, SYNTHESIS_TIMEOUT } from "../src/index.ts"
 
 interface Reply {
   readonly exitCode?: number
@@ -20,9 +20,15 @@ interface Reply {
   readonly healthyAfterS?: number
   readonly plistExists?: boolean
   readonly recovery?: boolean
+  /** Content of the cancel marker when the speech enters the queue (default: file absent). */
+  readonly cancelMarker?: string
 }
 
 const LOCK = "/state/jarvis/fala.lock"
+const CANCEL = "/state/jarvis/fala.cancel"
+/** The lockf argv: the cancel guard runs under the lock and then execs the player. */
+const lockedArgs = (entry: string, ...player: ReadonlyArray<string>) =>
+  ["-k", "-t", "120", LOCK, "/bin/sh", "-c", CANCEL_GUARD, "sh", CANCEL, entry, ...player]
 const TTS_URL = "http://127.0.0.1:7349"
 const PLIST = "/home/Library/LaunchAgents/dev.jarvis.tts.plist"
 const FALA_LOG = "/state/jarvis/tts/logs/fala.log"
@@ -100,6 +106,10 @@ const fakeSpawner = (reply: Reply = {}) => {
   const written: Array<{ readonly path: string; readonly bytes: Uint8Array }> = []
   const removed: Array<string> = []
   const fs = FileSystem.layerNoop({
+    readFileString: (path) =>
+      path === CANCEL && reply.cancelMarker !== undefined
+        ? Effect.succeed(`${reply.cancelMarker}\n`)
+        : Effect.fail(new PlatformError(new SystemError({ _tag: "NotFound", module: "FileSystem", method: "readFileString" }))),
     exists: () => Effect.succeed(reply.plistExists ?? true),
     writeFileString: (path, data) => Effect.sync(() => void log.push(`${path}\n${data}`)),
     makeDirectory: (path) => Effect.sync(() => void directories.push(path)),
@@ -146,17 +156,10 @@ describe("MacVoice.speak through say", () => {
       assert.strictEqual(command?.command, LOCKF)
       assert.strictEqual(LOCKF, "/usr/bin/lockf")
       assert.strictEqual(SAY, "/usr/bin/say")
-      assert.deepStrictEqual(command?.args, [
-        "-k",
-        "-t",
-        "120",
-        LOCK,
-        "/usr/bin/say",
-        "-v",
-        "Luciana",
-        "--",
-        "-v Fred; rm -rf ~ `x` $(y)"
-      ])
+      assert.deepStrictEqual(
+        command?.args,
+        lockedArgs("", "/usr/bin/say", "-v", "Luciana", "--", "-v Fred; rm -rf ~ `x` $(y)")
+      )
       assert.isUndefined(command?.options.shell)
       assert.strictEqual(command?.options.stdin, "ignore")
       assert.deepStrictEqual(fake.directories, ["/state/jarvis"])
@@ -256,7 +259,7 @@ describe("MacVoice.speak through the TTS server", () => {
       const [command] = fake.commands
       assert.strictEqual(command?.command, "/usr/bin/lockf")
       assert.strictEqual(AFPLAY, "/usr/bin/afplay")
-      assert.deepStrictEqual(command?.args, ["-k", "-t", "120", LOCK, "/usr/bin/afplay", WAV_FILE])
+      assert.deepStrictEqual(command?.args, lockedArgs("", "/usr/bin/afplay", WAV_FILE))
       assert.isUndefined(command?.options.shell)
       // The temporary WAV is removed once afplay exited.
       assert.deepStrictEqual(fake.removed, [WAV_FILE])
@@ -270,7 +273,7 @@ describe("MacVoice.speak through the TTS server", () => {
         yield* speak("Olá")
         assert.strictEqual(fake.requests.length, 1)
         assert.strictEqual(fake.commands.length, 1)
-        assert.deepStrictEqual(fake.commands[0]?.args, ["-k", "-t", "120", LOCK, SAY, "-v", "Luciana", "--", "Olá"])
+        assert.deepStrictEqual(fake.commands[0]?.args, lockedArgs("", SAY, "-v", "Luciana", "--", "Olá"))
       }).pipe(Effect.provide(fake.layer))
     })
   }
@@ -284,7 +287,7 @@ describe("MacVoice.speak through the TTS server", () => {
       yield* TestClock.adjust(Duration.millis(1))
       yield* Fiber.join(fiber)
       assert.strictEqual(fake.requests.length, 1)
-      assert.strictEqual(fake.commands[0]?.args[4], SAY)
+      assert.strictEqual(fake.commands[0]?.args[10], SAY)
     }).pipe(Effect.provide(fake.layer))
   })
 
@@ -294,7 +297,7 @@ describe("MacVoice.speak through the TTS server", () => {
       const error = yield* Effect.flip(speak("Olá"))
       assert.match(error.message, /^afplay failed with exit code 1/)
       assert.strictEqual(fake.commands.length, 1)
-      assert.strictEqual(fake.commands[0]?.args[4], AFPLAY)
+      assert.strictEqual(fake.commands[0]?.args[10], AFPLAY)
     }).pipe(Effect.provide(fake.layer))
   })
 })
@@ -313,7 +316,7 @@ describe("MacVoice.speak recovering the TTS LaunchAgent", () => {
         ["print", "gui/501/dev.jarvis.tts"],
         ["kickstart", "gui/501/dev.jarvis.tts"]
       ])
-      assert.strictEqual(fake.commands.at(-1)?.args[4], AFPLAY)
+      assert.strictEqual(fake.commands.at(-1)?.args[10], AFPLAY)
       assert.strictEqual(fake.log.length, 1)
       assert.match(fake.log[0]!, /^\/state\/jarvis\/tts\/logs\/fala\.log\n\S+Z pid=\d+ motor=kokoro chars=3 audio_s=0 rc=0 dur_s=\d+\n$/)
     }).pipe(Effect.provide(fake.layer))
@@ -329,7 +332,7 @@ describe("MacVoice.speak recovering the TTS LaunchAgent", () => {
         ["print", "gui/501/dev.jarvis.tts"],
         ["bootstrap", "gui/501", PLIST]
       ])
-      assert.strictEqual(fake.commands.at(-1)?.args[4], AFPLAY)
+      assert.strictEqual(fake.commands.at(-1)?.args[10], AFPLAY)
     }).pipe(Effect.provide(fake.layer))
   })
 
@@ -341,7 +344,7 @@ describe("MacVoice.speak recovering the TTS LaunchAgent", () => {
       assert.isUndefined(fiber.pollUnsafe())
       yield* TestClock.adjust(Duration.seconds(2))
       yield* Fiber.join(fiber)
-      assert.strictEqual(fake.commands.at(-1)?.args[4], SAY)
+      assert.strictEqual(fake.commands.at(-1)?.args[10], SAY)
       assert.match(fake.log[0]!, /motor=say chars=3 audio_s=\? rc=0 dur_s=\d+ motivo=tts_nao_subiu\n$/)
     }).pipe(Effect.provide(fake.layer))
   })
@@ -351,7 +354,7 @@ describe("MacVoice.speak recovering the TTS LaunchAgent", () => {
     return Effect.gen(function*() {
       yield* speak("Olá")
       assert.deepStrictEqual(launchctlArgs(fake), [["print", "gui/501/dev.jarvis.tts"]])
-      assert.strictEqual(fake.commands.at(-1)?.args[4], SAY)
+      assert.strictEqual(fake.commands.at(-1)?.args[10], SAY)
     }).pipe(Effect.provide(fake.layer))
   })
 
@@ -363,6 +366,38 @@ describe("MacVoice.speak recovering the TTS LaunchAgent", () => {
       assert.match(fake.log[0]!, /motor=say .* motivo=tts_falhou\n$/)
     }).pipe(Effect.provide(fake.layer))
   })
+})
+
+describe("MacVoice.speak queue cancellation (jarvis-cala)", () => {
+  it.effect("hands the marker content seen at queue entry to the guard under the lock", () => {
+    const fake = fakeSpawner({ tts: "wav", cancelMarker: "1760000000.42.1234" })
+    return Effect.gen(function*() {
+      yield* speak("Olá")
+      assert.deepStrictEqual(fake.commands[0]?.args, lockedArgs("1760000000.42.1234", AFPLAY, WAV_FILE))
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("logs a speech cancelled while queued as descartada and does not report success", () => {
+    const fake = fakeSpawner({ tts: "wav", exitCode: 76, recovery: true })
+    return Effect.gen(function*() {
+      const error = yield* Effect.flip(speak("Olá"))
+      assert.match(error.message, /^Fala descartada: o Jarvis foi interrompido \(jarvis-cala\)/)
+      assert.strictEqual(fake.log.length, 1)
+      assert.match(fake.log[0]!, /motor=descartada chars=3 audio_s=0 rc=0 dur_s=\d+ motivo=interrompida\n$/)
+      assert.deepStrictEqual(fake.removed, [WAV_FILE])
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  for (const code of [70, 143]) {
+    it.effect(`logs a speech killed by jarvis-cala while playing (exit ${code}) as rc=143`, () => {
+      const fake = fakeSpawner({ tts: "wav", exitCode: code, recovery: true })
+      return Effect.gen(function*() {
+        const error = yield* Effect.flip(speak("Olá"))
+        assert.match(error.message, /^Fala interrompida \(jarvis-cala\)/)
+        assert.match(fake.log[0]!, /motor=kokoro chars=3 audio_s=0 rc=143 dur_s=\d+\n$/)
+      }).pipe(Effect.provide(fake.layer))
+    })
+  }
 })
 
 describe("MacVoiceConfig", () => {
@@ -381,6 +416,7 @@ describe("MacVoiceConfig", () => {
       assert.deepStrictEqual(config, {
         voice: "Luciana",
         lock: "/Users/test/.local/share/jarvis/fala.lock",
+        cancel: "/Users/test/.local/share/jarvis/fala.cancel",
         ttsUrl: "http://127.0.0.1:7349",
         ttsVoice: "pf_dora",
         ttsRecovery: {
@@ -391,6 +427,18 @@ describe("MacVoiceConfig", () => {
         },
         falaLog: "/Users/test/.local/share/jarvis/tts/logs/fala.log"
       })
+    }))
+
+  it.effect("JARVIS_FALA_LOCK wins over AI_VOICE_MAC_LOCK and JARVIS_FALA_CANCEL moves the marker", () =>
+    Effect.gen(function*() {
+      const config = yield* load({
+        HOME: "/Users/test",
+        JARVIS_FALA_LOCK: "/tmp/p/a.lock",
+        AI_VOICE_MAC_LOCK: "/tmp/x/y.lock",
+        JARVIS_FALA_CANCEL: "/tmp/p/marcador"
+      })
+      assert.strictEqual(config.lock, "/tmp/p/a.lock")
+      assert.strictEqual(config.cancel, "/tmp/p/marcador")
     }))
 
   it.effect("reads AI_VOICE_MAC_VOICE, AI_VOICE_MAC_LOCK, AI_VOICE_TTS_URL and AI_VOICE_TTS_VOICE", () =>
@@ -405,6 +453,7 @@ describe("MacVoiceConfig", () => {
       assert.deepStrictEqual(config, {
         voice: "Felipe",
         lock: "/tmp/x/y.lock",
+        cancel: "/tmp/x/fala.cancel",
         ttsUrl: "http://127.0.0.1:9000",
         ttsVoice: "pm_alex",
         ttsRecovery: {
