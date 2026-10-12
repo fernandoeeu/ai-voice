@@ -19,6 +19,14 @@ LOG_DIR="$DATA_DIR/logs"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 DOMAIN="gui/$(id -u)"
 
+# Ajustes do scripts/setup.sh (marketplace, locale, Echo padrão); sem o arquivo, valem os padrões abaixo.
+CONFIG="${JARVIS_CONFIG:-$HOME/.config/jarvis/jarvis.env}"
+# shellcheck disable=SC1090
+[ -f "$CONFIG" ] && . "$CONFIG"
+AI_VOICE_AMAZON_PAGE="${AI_VOICE_AMAZON_PAGE:-amazon.com.br}"
+AI_VOICE_LOCALE="${AI_VOICE_LOCALE:-pt-BR}"
+AI_VOICE_DEFAULT_DEVICE="${AI_VOICE_DEFAULT_DEVICE:-}"
+
 BUN="$(command -v bun || true)"
 [ -n "$BUN" ] || BUN="$HOME/.bun/bin/bun"
 [ -x "$BUN" ] || { echo "bun não encontrado (procurei no PATH e em ~/.bun/bin)." >&2; exit 1; }
@@ -67,10 +75,10 @@ cat >"$NEW_PLIST" <<PLIST
     <key>PORT</key><string>$PORT</string>
     <key>NODE_ENV</key><string>production</string>
     <key>PATH</key><string>$(xml "$(dirname "$BUN")"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>AI_VOICE_AMAZON_PAGE</key><string>amazon.com.br</string>
-    <key>AI_VOICE_LOCALE</key><string>pt-BR</string>
+    <key>AI_VOICE_AMAZON_PAGE</key><string>$(xml "$AI_VOICE_AMAZON_PAGE")</string>
+    <key>AI_VOICE_LOCALE</key><string>$(xml "$AI_VOICE_LOCALE")</string>
     <key>AI_VOICE_ENABLE_SPEECH</key><string>1</string>
-    <key>AI_VOICE_DEFAULT_DEVICE</key><string></string>
+    <key>AI_VOICE_DEFAULT_DEVICE</key><string>$(xml "$AI_VOICE_DEFAULT_DEVICE")</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

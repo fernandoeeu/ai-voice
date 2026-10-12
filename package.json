@@ -10,7 +10,8 @@
     "build": "turbo run build",
     "check": "turbo run check",
     "test": "turbo run test",
-    "voice": "bun --cwd apps/mcp src/main.ts"
+    "voice": "bun --cwd apps/mcp src/main.ts",
+    "setup": "./scripts/setup.sh"
   },
   "devDependencies": {
     "turbo": "2.11.7",
