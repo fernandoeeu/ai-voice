@@ -16,6 +16,12 @@ const SWIFTC = "/usr/bin/swiftc"
 const CODESIGN = "/usr/bin/codesign"
 const BUNDLE_ID = "dev.jarvis.calendar-events"
 
+/** Code signing identity in the login keychain (`$JARVIS_SIGNING_IDENTITY`, default "Jarvis Local Signing"). */
+const signingIdentity = (): string => {
+  const override = process.env["JARVIS_SIGNING_IDENTITY"]
+  return override !== undefined && override.trim() !== "" ? override : "Jarvis Local Signing"
+}
+
 /** The Swift source and Info.plist the helper is compiled from. */
 export interface HelperSources {
   readonly source: string
@@ -101,8 +107,11 @@ export const buildHelper = (
         "-o",
         partial
       ])
-      // Re-sign ad hoc with a stable identifier so the embedded Info.plist is bound.
-      yield* step(spawner, CODESIGN, ["--force", "--sign", "-", "--identifier", BUNDLE_ID, partial])
+      // Signs with the stable local identity so macOS keeps the Calendar permission across rebuilds,
+      // and binds the embedded Info.plist. Without that certificate in the keychain, signs ad hoc.
+      yield* step(spawner, CODESIGN, ["--force", "--sign", signingIdentity(), "--identifier", BUNDLE_ID, partial]).pipe(
+        Effect.catch(() => step(spawner, CODESIGN, ["--force", "--sign", "-", "--identifier", BUNDLE_ID, partial]))
+      )
       yield* Effect.try({
         try: () => renameSync(partial, binary),
         catch: () => new AutomationError({ message: "Could not install the Calendar helper." })

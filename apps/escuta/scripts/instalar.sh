@@ -2,8 +2,8 @@
 # Compila a Escuta, monta ~/.local/share/jarvis/bin/Escuta.app e grava o LaunchAgent dev.jarvis.escuta.
 # Uso: scripts/instalar.sh [--carregar]
 #   --carregar  também (re)carrega o LaunchAgent no launchd.
-# O .app só é trocado se o binário mudou: cada binário novo (assinatura ad hoc) pede de novo a
-# permissão do microfone no macOS.
+# O .app só é trocado se o binário mudou. Assinado com "Jarvis Local Signing", as permissões
+# do macOS sobrevivem a rebuilds; com assinatura ad hoc, cada binário novo pede de novo.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -13,6 +13,10 @@ APP="$JARVIS/bin/Escuta.app"
 LABEL="dev.jarvis.escuta"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 STATE="$JARVIS/escuta"
+# Identidade de assinatura estável (certificado na keychain de login). Com ela, o macOS lembra as
+# permissões de microfone e de fala entre builds; sem ela, assina ad hoc e pode perguntar de novo.
+IDENTITY="${JARVIS_SIGNING_IDENTITY:-Jarvis Local Signing}"
+if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; then SIGN="$IDENTITY"; else SIGN="-"; fi
 
 # Ajustes do scripts/setup.sh; vazio = o padrão da própria escuta (Config.swift).
 CONFIG="${JARVIS_CONFIG:-$HOME/.config/jarvis/jarvis.env}"
@@ -24,13 +28,15 @@ swift build -c release --package-path "$PKG"
 BIN="$(swift build -c release --package-path "$PKG" --show-bin-path)/Escuta"
 
 mkdir -p "$APP/Contents/MacOS" "$STATE/logs"
-if cmp -s "$BIN" "$APP/Contents/MacOS/Escuta" && cmp -s "$PKG/Resources/Info.plist" "$APP/Contents/Info.plist"; then
+signed_by() { codesign -dv "$APP" 2>&1 | grep -q "Authority=$IDENTITY"; }
+if cmp -s "$BIN" "$APP/Contents/MacOS/Escuta" && cmp -s "$PKG/Resources/Info.plist" "$APP/Contents/Info.plist" \
+   && { [ "$SIGN" = "-" ] || signed_by; }; then
   echo "Escuta.app já está atualizado"
 else
   cp "$PKG/Resources/Info.plist" "$APP/Contents/Info.plist"
   cp "$BIN" "$APP/Contents/MacOS/Escuta"
-  codesign --force --sign - --identifier "$LABEL" "$APP"
-  echo "Escuta.app instalado em $APP"
+  codesign --force --sign "$SIGN" --identifier "$LABEL" "$APP"
+  echo "Escuta.app instalado em $APP (assinatura: $([ "$SIGN" = "-" ] && echo "ad hoc" || echo "$SIGN"))"
 fi
 
 cat > "$PLIST" <<EOF
