@@ -69,3 +69,32 @@ fn bloco_seguinte_de_fala_calada_e_descartado() {
     f.tocar(FalaId(2), tom(2_400), true);
     assert_eq!(f.pendentes(), 2_400);
 }
+
+#[test]
+fn esvaziou_leva_a_hora_do_som_real() {
+    use jarvis_audio::nucleo::{Nucleo, Sinal};
+    use std::time::Instant;
+    let n = Nucleo::novo(24_000, 1, None);
+    assert!(n.enfileirar(FalaId(1), &tom(240), true)); // 10 ms
+    let t0 = Instant::now();
+    let lat = Duration::from_millis(200); // fone Bluetooth
+    let mut buf = vec![0.0; 480];
+    n.callback(&mut buf, t0, lat);
+    let mut rx = n.sinais.lock().unwrap();
+    let mut hora_fim = None;
+    while let Ok(s) = rx.pop() {
+        if let Sinal::Esvaziou { fala, hora } = s {
+            assert_eq!(fala, FalaId(1));
+            hora_fim = Some(hora);
+        }
+    }
+    let hora = hora_fim.expect("sem Esvaziou");
+    // ultima amostra (indice 239) sai em t0 + latencia + 239/24000 s
+    let esperado = t0 + lat + Duration::from_secs_f64(239.0 / 24_000.0);
+    let d = if hora > esperado {
+        hora - esperado
+    } else {
+        esperado - hora
+    };
+    assert!(d < Duration::from_micros(100), "{d:?}");
+}

@@ -4,6 +4,7 @@
 //! dispositivo padrao ou a taxa mudam. O ring buffer vive no `Nucleo` e
 //! sobrevive as reconstrucoes.
 
+use std::collections::VecDeque;
 use std::sync::atomic::{
     AtomicBool,
     Ordering::{AcqRel, Relaxed},
@@ -20,8 +21,8 @@ use tokio::sync::broadcast;
 use crate::nucleo::{Nucleo, Sinal};
 use crate::{EventoSaida, FalaId, Pcm24k, Saida};
 
-/// Folga antes de fechar o stream no modo `nunca`/`janela`: o "esvaziou" sai
-/// quando a ultima amostra deixa o ring, mas ainda falta a latencia do fone.
+/// Folga antes de fechar o stream no modo `nunca`/`janela`, depois do
+/// "esvaziou" (que ja sai na hora prevista do som real).
 const FOLGA_FECHAR: Duration = Duration::from_millis(400);
 
 enum Cmd {
@@ -70,6 +71,7 @@ impl CpalSaida {
             stream: None,
             fechar_em: None,
             ultimo_erro: None,
+            fila: VecDeque::new(),
         };
         let gerente = std::thread::Builder::new()
             .name("jarvis-audio".into())
@@ -135,6 +137,9 @@ struct Gerente {
     stream: Option<cpal::Stream>,
     fechar_em: Option<Instant>,
     ultimo_erro: Option<Instant>,
+    /// Sinais do callback na ordem; o `Esvaziou` so sai na hora do som real e
+    /// segura os seguintes atras dele.
+    fila: VecDeque<Sinal>,
 }
 
 impl Gerente {
@@ -196,13 +201,17 @@ impl Gerente {
     }
 
     fn encaminhar_sinais(&mut self) {
-        let mut novos = Vec::new();
         if let Ok(mut rx) = self.nucleo.sinais.lock() {
             while let Ok(s) = rx.pop() {
-                novos.push(s);
+                self.fila.push_back(s);
             }
         }
-        for s in novos {
+        let agora = Instant::now();
+        while let Some(&s) = self.fila.front() {
+            if matches!(s, Sinal::Esvaziou { hora, .. } if agora < hora) {
+                break;
+            }
+            self.fila.pop_front();
             match s {
                 Sinal::PrimeiroSom { fala, hora } => {
                     self.fechar_em = None;
@@ -211,7 +220,7 @@ impl Gerente {
                         hora_saida: hora,
                     });
                 }
-                Sinal::Esvaziou { fala } => {
+                Sinal::Esvaziou { fala, .. } => {
                     let _ = self.tx.send(EventoSaida::Esvaziou { fala });
                     self.fechar_em = match self.manter {
                         Manter::Sempre => None,

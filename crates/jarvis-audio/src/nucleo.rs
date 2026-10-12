@@ -41,8 +41,16 @@ pub struct Marca {
 /// Sinal do callback para a thread gerente (sem alocacao).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Sinal {
-    PrimeiroSom { fala: FalaId, hora: Instant },
-    Esvaziou { fala: FalaId },
+    PrimeiroSom {
+        fala: FalaId,
+        hora: Instant,
+    },
+    /// `hora`: instante previsto em que a ultima amostra sai no DAC (hora do
+    /// callback mais a latencia do dispositivo, que no Bluetooth passa de 100 ms).
+    Esvaziou {
+        fala: FalaId,
+        hora: Instant,
+    },
 }
 
 /// Estado atomico compartilhado entre produtor, callback e quem chama `calar`.
@@ -396,7 +404,7 @@ impl Consumidor {
             let _ = self.marcas.pop();
             let _ = self.sinais.push(match m.tipo {
                 TipoMarca::Inicio => Sinal::PrimeiroSom { fala: m.fala, hora },
-                TipoMarca::Fim => Sinal::Esvaziou { fala: m.fala },
+                TipoMarca::Fim => Sinal::Esvaziou { fala: m.fala, hora },
             });
         }
     }

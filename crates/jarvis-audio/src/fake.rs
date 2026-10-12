@@ -71,7 +71,8 @@ impl FakeSaida {
                     fala,
                     hora_saida: hora,
                 },
-                Sinal::Esvaziou { fala } => EventoSaida::Esvaziou { fala },
+                // relogio manual: repassa ja, para o fake seguir deterministico
+                Sinal::Esvaziou { fala, .. } => EventoSaida::Esvaziou { fala },
             });
         }
     }
