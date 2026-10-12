@@ -195,6 +195,8 @@ Correção:
 2. **`voz-sempre`** volta a conter só o id da sessão do Chefe, sem `*`.
 3. **O Chefe agrega.** No máximo uma fala a cada 20 s. Avisos que chegam juntos viram uma frase só, e `HEARTBEAT_OK` e `REPLY_SKIP` nunca são falados.
 4. **TTL na fila.** Uma fala que esperou mais de 60 s pelo lock é descartada (`motor=descartada motivo=ttl` no `fala.log`). O `jarvis-cala` continua sendo o único ponto de interrupção.
+   Implementado (passo 2): a trava fica no `services/bin/jarvis-fala` (descarta, grava `motivo=bot:<bot>` no `fala.log` e manda `quadro msg <bot> chefe "<texto>"` se o CLI existir; `JARVIS_QUADRO_CLI` troca o caminho), com cópia da checagem em `jarvis-avisa` e `jarvis-fala-resposta`. Sessão sem `JARVIS_BOT` (a sessão jarvis e os panes antigos) mantém o comportamento atual. O TTL fica no `services/tts/fala-kokoro.sh` (`JARVIS_FALA_TTL_S`, padrão 60). Teste: `services/tts/test_voz_unica.sh`.
+   **Passo pendente, só ao aposentar os panes antigos:** remover o `*` de `~/.local/share/jarvis/voz-sempre` e deixar só o id da sessão do Chefe (`echo <id-do-chefe> > ~/.local/share/jarvis/voz-sempre`). Enquanto o `*` estiver lá, os panes sem `JARVIS_BOT` continuam falando.
 5. **Benchmark fora do `fala.lock`.** O bench usa só `~/.jarvis/locks/bench.lock` e saída nula. Ele nunca envolve uma rodada inteira em `lockf fala.lock`. Uma medição audível só acontece a pedido do Fernando, e cada amostra pega e solta o lock como uma fala comum. A guarda do tick confere o dono do `fala.lock`: se o lock está preso há mais de 90 s por algo que não é a cadeia normal de fala (`fala-kokoro.sh`, `afplay`, `say`, `curl`), o tick abre um evento para o Vigia e avisa o Chefe.
 
 ## 8. Escuta, dashboard e iPhone

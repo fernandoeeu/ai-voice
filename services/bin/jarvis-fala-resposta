@@ -11,6 +11,9 @@ CLAUDE = shutil.which("claude") or os.path.expanduser("~/.local/bin/claude")
 # O claude -p da reescrita também dispara o Stop: não reentrar.
 if os.environ.get("JARVIS_FALA_INNER") or os.environ.get("ALEXA_NOTIFY_INNER"):
     sys.exit(0)
+# Voz única: sessão de bot que não seja o chefe fica calada (sem JARVIS_BOT, comportamento de sempre).
+if os.environ.get("JARVIS_BOT", "chefe") != "chefe":
+    sys.exit(0)
 try:
     data = json.load(sys.stdin)
 except Exception:

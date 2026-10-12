@@ -23,8 +23,19 @@ mkdir -p "$(dirname "$LOCK")"
 
 # Reentra sob o lock (mesmo lock do jarvis-fala). O -t limita só a espera na fila por quem
 # ainda não tem o lock (sai com 75, EX_TEMPFAIL); quem já o segura toca até o fim, sem prazo.
+# TTL da fila: fala que espera mais de JARVIS_FALA_TTL_S (60 s) pelo lock é descartada e registrada.
 if [ -z "${JARVIS_FALA_LOCKED:-}" ]; then
-  JARVIS_FALA_ENTRY="$(cat "$CANCEL" 2>/dev/null)" JARVIS_FALA_LOCKED=1 exec /usr/bin/lockf -t 300 "$LOCK" "$0" "$@"
+  TTL="${JARVIS_FALA_TTL_S:-60}"
+  JARVIS_FALA_ENTRY="$(cat "$CANCEL" 2>/dev/null)" JARVIS_FALA_LOCKED=1 /usr/bin/lockf -t "$TTL" "$LOCK" "$0" "$@"
+  RC=$?
+  if [ "$RC" -eq 75 ]; then
+    LOG="${JARVIS_FALA_LOG:-$HOME/.local/share/jarvis/tts/logs/fala.log}"
+    mkdir -p "$(dirname "$LOG")" 2>/dev/null
+    printf '%s pid=%s motor=descartada chars=%s audio_s=0 rc=0 dur_s=%s motivo=ttl\n' \
+      "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "${#TEXT}" "$TTL" >>"$LOG" 2>/dev/null
+    exit 0
+  fi
+  exit "$RC"
 fi
 
 # Uma linha por fala em FALA_LOG: quanto áudio havia e como o tocador terminou. Código 143 é

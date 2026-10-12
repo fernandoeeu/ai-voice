@@ -10,6 +10,8 @@ VOICE_MARK=${JARVIS_VOZ_MARCADOR:-'[voz do '}
 CLAUDE=$(command -v claude || print -r -- "$HOME/.local/bin/claude")
 
 input=$(cat)
+# Voz única: só o chefe (ou sessão sem JARVIS_BOT) fala; o descarte e o evento ficam no jarvis-fala.
+[[ -n ${JARVIS_BOT:-} && $JARVIS_BOT != chefe ]] && exit 0
 [[ -n $ALEXA_NOTIFY_INNER || -n $JARVIS_FALA_INNER ]] && exit 0
 command -v jq >/dev/null || exit 0
 event=$(print -r -- "$input" | jq -r '.hook_event_name // ""')
