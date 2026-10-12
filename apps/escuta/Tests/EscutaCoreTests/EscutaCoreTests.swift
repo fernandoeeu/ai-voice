@@ -142,28 +142,77 @@ import Testing
     }
 
     @Test func ruidoAbaixoDoLimiarNuncaAbreFala() {
-        #expect(run([0.1, 0.5, 0.3, 0.55, 0.2]).allSatisfy { $0 == .silence })
+        #expect(run([0.1, 0.45, 0.3, 0.49, 0.2]).allSatisfy { $0 == .silence })
     }
 
     @Test func falaAbreEFechaDepoisDoSilencio() {
-        #expect(run([0.1, 0.9, 0.8, 0.1, 0.1, 0.1]) == [.silence, .start, .speech, .speech, .end(valid: true), .silence])
+        #expect(run([0.1, 0.9, 0.8, 0.1, 0.1, 0.1]) == [.silence, .start, .speech, .speech, .speech, .end(valid: true)])
     }
 
     @Test func pausaCurtaNaoCortaAFala() {
         // Um bloco de silêncio no meio (respiração) não fecha; a histerese segura 0,4 como voz.
-        #expect(run([0.9, 0.2, 0.4, 0.9, 0.1, 0.1]) == [.start, .speech, .speech, .speech, .speech, .end(valid: true)])
+        #expect(run([0.9, 0.2, 0.4, 0.9, 0.1, 0.1, 0.1]) == [.start, .speech, .speech, .speech, .speech, .speech, .end(valid: true)])
+    }
+
+    @Test func microfoneBaixoAbreComProbabilidadeMeia() {
+        #expect(run([0.52, 0.3, 0.1]) == [.start, .speech, .speech])
+    }
+
+    @Test func pausaDeMeioSegundoNaoDivideAFala() {
+        // Dois blocos (~0,5 s) de silêncio e a fala volta: continua a mesma fala.
+        #expect(run([0.9, 0.1, 0.1, 0.8]) == [.start, .speech, .speech, .speech])
     }
 
     @Test func estaloCurtoNaoVaiAoReconhecedor() {
         let c = VadGate.Config(minVoicedChunks: 2)
-        #expect(run([0.95, 0.1, 0.1], c) == [.start, .speech, .end(valid: false)])
+        #expect(run([0.95, 0.1, 0.1, 0.1], c) == [.start, .speech, .speech, .end(valid: false)])
     }
 
     @Test func vozDentroDaFalaUsaOLimiarMaisBaixo() {
         var g = VadGate()
-        #expect(!g.isVoice(0.5))
+        #expect(!g.isVoice(0.4))
         _ = g.step(0.9)
-        #expect(g.isVoice(0.5))
+        #expect(g.isVoice(0.3))
         #expect(!g.isVoice(0.2))
+    }
+}
+
+@Suite struct EndpointJuncaoTests {
+    @Test func palavrasAbertasNovas() {
+        for t in ["E de preferência de uma", "pode ser, tá", "isso não", "faz isso pra", "mas"] {
+            #expect(Endpoint.endsOpen(t), "\(t)")
+        }
+        #expect(Endpoint.endsOpen("Qual foi o pacote,"))
+        #expect(!Endpoint.endsOpen("Abre a agenda."))
+    }
+
+    @Test func fraseSemPontuacaoOuAbertaFicaRetida() {
+        #expect(Endpoint.shouldHold("Manda um agente"))
+        #expect(Endpoint.shouldHold("E de preferência de uma"))
+        #expect(Endpoint.shouldHold("E de preferência de uma."))  // ponto cedo após palavra aberta
+        #expect(Endpoint.shouldHold("Manda um agente,"))
+        #expect(!Endpoint.shouldHold("Abre a agenda de amanhã."))
+        #expect(!Endpoint.shouldHold("Que horas são?"))
+    }
+
+    @Test func juntaDentroDaJanela() {
+        #expect(Endpoint.shouldMerge(previous: "Manda um agente", gap: 0.8, window: 1.5))
+        #expect(Endpoint.shouldMerge(previous: "E de preferência de uma", gap: 1.2, window: 1.5))
+        #expect(!Endpoint.shouldMerge(previous: "Manda um agente", gap: 1.6, window: 1.5))
+        #expect(!Endpoint.shouldMerge(previous: "Abre a agenda.", gap: 0.5, window: 1.5))
+    }
+
+    @Test func descartaSoPontuacao() {
+        #expect(!Endpoint.hasLetters("."))
+        #expect(!Endpoint.hasLetters(" . "))
+        #expect(!Endpoint.hasLetters(""))
+        #expect(Endpoint.hasLetters("Sim."))
+    }
+
+    @Test func decideContinuaFechandoPorSilencio() {
+        let c = EndpointConfig(silence: 1.0, openSilence: 2.2)
+        #expect(Endpoint.decide(text: "Manda um agente", volatile: false, silence: 1.1, sinceText: 1, sinceFinalize: 0.1, elapsed: 5, config: c) == .close("silêncio"))
+        #expect(Endpoint.decide(text: "E de preferência de uma", volatile: false, silence: 1.5, sinceText: 1, sinceFinalize: 0.1, elapsed: 5, config: c) == .wait)
+        #expect(Endpoint.decide(text: "E de preferência de uma", volatile: false, silence: 2.3, sinceText: 1, sinceFinalize: 0.1, elapsed: 5, config: c) == .close("silêncio após frase aberta"))
     }
 }

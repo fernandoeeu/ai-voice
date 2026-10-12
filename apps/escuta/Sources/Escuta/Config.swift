@@ -77,7 +77,10 @@ struct Config {
             c.stt = "apple"
         }
         // O Parakeet devolve o texto final na hora e a VAD mede o silêncio de verdade: fecha a fala mais cedo.
-        if c.stt == "parakeet", num("ESCUTA_SILENCIO") == nil { c.endpoint.silence = 0.7 }
+        // Env ESCUTA_SILENCIO / ESCUTA_SILENCIO_ABERTA (se definidos) vencem estes padrões.
+        if c.stt == "parakeet" {
+            if num("ESCUTA_SILENCIO") == nil { c.endpoint.silence = 1.0 }
+        }
         return c
     }
 }

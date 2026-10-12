@@ -132,8 +132,12 @@ final class ParakeetPipeline: @unchecked Sendable {
     private let minConfidence: Double
     private var vadState: VadStreamState
     private var gate = VadGate()
-    /// O bloco anterior ao começo da fala: a VAD abre um pouco atrasada e cortaria a primeira sílaba.
+    /// Os 3 blocos (~0,77 s) anteriores ao começo da fala: a VAD abre atrasada e cortaria a primeira sílaba.
     private var preroll: [Float] = []
+    private static let prerollChunks = 3
+    /// Blocos de cauda incluídos depois do fim da VAD, para não cortar a última palavra.
+    private static let tailChunks = 2
+    private var tailLeft = 0
     private var utterance: [Float] = []
     private var lastPartialText = ""
     private var failures = 0
@@ -165,28 +169,52 @@ final class ParakeetPipeline: @unchecked Sendable {
         }
         switch step {
         case .silence:
-            preroll = chunk
+            if tailLeft > 0 {
+                utterance += chunk
+                tailLeft -= 1
+                if tailLeft == 0 { preroll = []; out += await final() }
+            } else {
+                keepPreroll(chunk)
+            }
         case .start:
-            utterance = preroll + chunk
+            if tailLeft > 0 {
+                // Voltou a falar na cauda: é a mesma fala, só emenda.
+                tailLeft = 0
+                utterance += chunk
+            } else {
+                utterance = preroll + chunk
+            }
             lastPartialText = ""
             if partials { out += await partial() }
         case .speech:
+            tailLeft = 0
             utterance += chunk
             // Fala longa: fecha um trecho a cada ~14 s (a janela do modelo); a escuta junta os trechos.
             if utterance.count >= 16000 * 14 { out += await final() }
             else if partials { out += await partial() }
         case .end(let valid):
             utterance += chunk
-            preroll = chunk
-            if valid { out += await final() } else { utterance = [] }
+            if valid {
+                tailLeft = Self.tailChunks
+            } else {
+                utterance = []
+                keepPreroll(chunk)
+            }
         }
         return out
     }
 
     /// A escuta pediu os finais: transcreve o que houver e zera o trecho.
     func finalize() async -> [Output] {
+        tailLeft = 0
         guard !utterance.isEmpty else { return [] }
         return await final()
+    }
+
+    private func keepPreroll(_ chunk: [Float]) {
+        preroll.append(contentsOf: chunk)
+        let max = Self.prerollChunks * chunk.count
+        if preroll.count > max { preroll.removeFirst(preroll.count - max) }
     }
 
     private func partial() async -> [Output] {
