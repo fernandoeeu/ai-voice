@@ -1,0 +1,212 @@
+{
+ "properties": {
+  "id": {
+   "type": "string"
+  },
+  "result": {
+   "$ref": "#/schemas/success_response/$defs/ResponseResult"
+  }
+ },
+ "$defs": {
+  "AgentInfo": {
+   "properties": {
+    "agent": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "agent_session": {
+     "anyOf": [
+      {
+       "$ref": "#/schemas/success_response/$defs/AgentSessionInfo"
+      },
+      {
+       "type": "null"
+      }
+     ]
+    },
+    "agent_status": {
+     "$ref": "#/schemas/success_response/$defs/AgentStatus"
+    },
+    "cwd": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "display_agent": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "focused": {
+     "type": "boolean"
+    },
+    "foreground_cwd": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "interactive_ready": {
+     "type": "boolean"
+    },
+    "launch_pending": {
+     "type": "boolean"
+    },
+    "name": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "pane_id": {
+     "type": "string"
+    },
+    "revision": {
+     "format": "uint64",
+     "minimum": 0,
+     "type": "integer"
+    },
+    "screen_detection_skipped": {
+     "type": "boolean"
+    },
+    "state_change_seq": {
+     "default": 0,
+     "format": "uint64",
+     "minimum": 0,
+     "type": "integer"
+    },
+    "state_labels": {
+     "additionalProperties": {
+      "type": "string"
+     },
+     "type": "object"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "terminal_id": {
+     "type": "string"
+    },
+    "terminal_title": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "terminal_title_stripped": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "title": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "tokens": {
+     "additionalProperties": {
+      "type": "string"
+     },
+     "maxProperties": 32,
+     "propertyNames": {
+      "pattern": "^[A-Za-z0-9_-]{1,32}$"
+     },
+     "type": "object"
+    },
+    "workspace_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "terminal_id",
+    "agent_status",
+    "workspace_id",
+    "tab_id",
+    "pane_id",
+    "focused",
+    "revision"
+   ],
+   "type": "object"
+  },
+  "AgentStatus": {
+   "enum": [
+    "idle",
+    "working",
+    "blocked",
+    "done",
+    "unknown"
+   ],
+   "type": "string"
+  },
+  "AgentSessionInfo": {
+   "properties": {
+    "agent": {
+     "type": "string"
+    },
+    "kind": {
+     "$ref": "#/schemas/success_response/$defs/AgentSessionRefKind"
+    },
+    "source": {
+     "type": "string"
+    },
+    "value": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "source",
+    "agent",
+    "kind",
+    "value"
+   ],
+   "type": "object"
+  },
+  "AgentSessionRefKind": {
+   "enum": [
+    "id",
+    "path"
+   ],
+   "type": "string"
+  },
+  "ServerCapabilities": {
+   "properties": {
+    "detached_server_daemon": {
+     "default": false,
+     "type": "boolean"
+    },
+    "endpoint_protocol_generation": {
+     "description": "Stable client-owned endpoint generation supported by this server.",
+     "format": "uint32",
+     "minimum": 0,
+     "type": [
+      "integer",
+      "null"
+     ]
+    },
+    "health_check": {
+     "default": false,
+     "description": "Whether this server supports endpoint health probes.",
+     "type": "boolean"
+    },
+    "live_handoff": {
+     "type": "boolean"
+    },
+    "surface_interest": {
+     "default": false,
+     "description": "Whether this server supports explicit client-shell surface interest.",
+     "type": "boolean"
+    }
+   },
+   "required": [
+    "live_handoff"
+   ],
+   "type": "object"
+  }
+ }
+}

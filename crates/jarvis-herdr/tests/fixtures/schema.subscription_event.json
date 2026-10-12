@@ -1,0 +1,213 @@
+{
+ "$defs": {
+  "AgentStatus": {
+   "enum": [
+    "idle",
+    "working",
+    "blocked",
+    "done",
+    "unknown"
+   ],
+   "type": "string"
+  },
+  "PaneAgentStatusChangedEvent": {
+   "properties": {
+    "agent": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "agent_status": {
+     "$ref": "#/schemas/subscription_event/$defs/AgentStatus"
+    },
+    "display_agent": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "pane_id": {
+     "type": "string"
+    },
+    "state_labels": {
+     "additionalProperties": {
+      "type": "string"
+     },
+     "type": "object"
+    },
+    "title": {
+     "type": [
+      "string",
+      "null"
+     ]
+    },
+    "workspace_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "pane_id",
+    "workspace_id",
+    "agent_status"
+   ],
+   "type": "object"
+  },
+  "PaneOutputMatchedEvent": {
+   "properties": {
+    "matched_line": {
+     "type": "string"
+    },
+    "pane_id": {
+     "type": "string"
+    },
+    "read": {
+     "$ref": "#/schemas/subscription_event/$defs/PaneReadResult"
+    }
+   },
+   "required": [
+    "pane_id",
+    "matched_line",
+    "read"
+   ],
+   "type": "object"
+  },
+  "PaneReadResult": {
+   "properties": {
+    "format": {
+     "$ref": "#/schemas/subscription_event/$defs/ReadFormat"
+    },
+    "pane_id": {
+     "type": "string"
+    },
+    "revision": {
+     "format": "uint64",
+     "minimum": 0,
+     "type": "integer"
+    },
+    "source": {
+     "$ref": "#/schemas/subscription_event/$defs/ReadSource"
+    },
+    "tab_id": {
+     "type": "string"
+    },
+    "text": {
+     "type": "string"
+    },
+    "truncated": {
+     "type": "boolean"
+    },
+    "workspace_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "pane_id",
+    "workspace_id",
+    "tab_id",
+    "source",
+    "format",
+    "text",
+    "revision",
+    "truncated"
+   ],
+   "type": "object"
+  },
+  "PaneScrollChangedEvent": {
+   "properties": {
+    "pane_id": {
+     "type": "string"
+    },
+    "scroll": {
+     "$ref": "#/schemas/subscription_event/$defs/PaneScrollInfo"
+    },
+    "workspace_id": {
+     "type": "string"
+    }
+   },
+   "required": [
+    "pane_id",
+    "workspace_id",
+    "scroll"
+   ],
+   "type": "object"
+  },
+  "PaneScrollInfo": {
+   "properties": {
+    "max_offset_from_bottom": {
+     "format": "uint64",
+     "minimum": 0,
+     "type": "integer"
+    },
+    "offset_from_bottom": {
+     "format": "uint64",
+     "minimum": 0,
+     "type": "integer"
+    },
+    "viewport_rows": {
+     "format": "uint64",
+     "minimum": 0,
+     "type": "integer"
+    }
+   },
+   "required": [
+    "offset_from_bottom",
+    "max_offset_from_bottom",
+    "viewport_rows"
+   ],
+   "type": "object"
+  },
+  "ReadFormat": {
+   "enum": [
+    "text",
+    "ansi"
+   ],
+   "type": "string"
+  },
+  "ReadSource": {
+   "enum": [
+    "visible",
+    "recent",
+    "recent_unwrapped",
+    "detection"
+   ],
+   "type": "string"
+  },
+  "SubscriptionEventData": {
+   "anyOf": [
+    {
+     "$ref": "#/schemas/subscription_event/$defs/PaneOutputMatchedEvent"
+    },
+    {
+     "$ref": "#/schemas/subscription_event/$defs/PaneAgentStatusChangedEvent"
+    },
+    {
+     "$ref": "#/schemas/subscription_event/$defs/PaneScrollChangedEvent"
+    }
+   ]
+  },
+  "SubscriptionEventKind": {
+   "enum": [
+    "pane.output_matched",
+    "pane.agent_status_changed",
+    "pane.scroll_changed"
+   ],
+   "type": "string"
+  }
+ },
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "properties": {
+  "data": {
+   "$ref": "#/schemas/subscription_event/$defs/SubscriptionEventData"
+  },
+  "event": {
+   "$ref": "#/schemas/subscription_event/$defs/SubscriptionEventKind"
+  }
+ },
+ "required": [
+  "event",
+  "data"
+ ],
+ "title": "SubscriptionEventEnvelope",
+ "type": "object"
+}
