@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Daemon residente do Jarvis (esqueleto)"
+description = "Daemon residente do Jarvis: socket NDJSON, fila de fala e saida de audio"
 
 [lints]
 workspace = true
@@ -12,7 +12,15 @@ workspace = true
 [dependencies]
 jarvis-protocolo.workspace = true
 jarvis-fala.workspace = true
-jarvis-herdr.workspace = true
+jarvis-kokoro.workspace = true
+jarvis-audio.workspace = true
+jarvis-lock.workspace = true
 anyhow.workspace = true
-tokio.workspace = true
+serde_json.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 tracing.workspace = true
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
+rustix = { version = "1.1.5", features = ["process"] }
+
+[dev-dependencies]
+tempfile = "3.27.0"
