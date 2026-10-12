@@ -66,7 +66,6 @@ final class AudioGate: @unchecked Sendable {
 
 final class Escuta: ObservableObject {
     @Published var phase: Phase = .starting
-    @Published var levels: [Float] = Array(repeating: 0, count: 56)
     @Published var partial = ""
     @Published var heard: [Heard] = []
     @Published var commands: [Command] = []
@@ -74,7 +73,15 @@ final class Escuta: ObservableObject {
     @Published var airpodsName: String?
     @Published var airpodsRate: Double = 0
     @Published var errorText: String?
-    @Published var armedUntil: Date?
+    @Published var armedUntil: Date? {
+        // Sem o tick rápido parado, a janela vence na hora certa por um tick marcado para o fim dela.
+        didSet {
+            guard let u = armedUntil else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + max(0, u.timeIntervalSinceNow) + 0.01) { [weak self] in
+                MainActor.assumeIsolated { self?.tick() }
+            }
+        }
+    }
     @Published var lastWakeAt: Date?
     @Published var diag = "áudio: aguardando"
     @Published var waiting: [WaitItem] = []
@@ -88,6 +95,8 @@ final class Escuta: ObservableObject {
     let router: Router
     let recognizer: SpeechEngine
     let gate = AudioGate()
+    /// Onda do painel, fora deste objeto: o nível muda a cada buffer e não pode redesenhar tudo.
+    let levelFeed = LevelFeed()
     private let mic = MicCapture()
     private var converter: AVAudioConverter?   // só na thread de captura
     private var nextID = 1
@@ -144,11 +153,12 @@ final class Escuta: ObservableObject {
         // Com VAD (Parakeet), o silêncio do fim de fala vem dela, não do volume do microfone.
         recognizer.setVoiceHandler { [weak self] at in self?.lastVoiceAt = at }
         Task { @MainActor in await self.start() }
-        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
+        scheduleTick()
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.reportDiag() }
         if config.audioFile == nil {
             Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.checkAirPods() }
-            Timer.scheduledTimer(withTimeInterval: 0.4, repeats: true) { [weak self] _ in self?.readClaudeStatus() }
+            watchClaudeStatus()
+            Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in self?.watchClaudeStatus() }
             Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.refreshWaiting() }
         }
         pollSpeechLock()
@@ -359,6 +369,7 @@ final class Escuta: ObservableObject {
         let talking = utteranceStart != nil || now.timeIntervalSince(lastVoiceAt) < 1.5
         logLine("encerrando (\(reason))" + (talking ? "; espero a fala em curso terminar" : ""))
         checkShutdown()
+        if !tickFast { scheduleTick() }
     }
 
     @MainActor
@@ -410,8 +421,7 @@ final class Escuta: ObservableObject {
             // Já falando, cada bloco com voz renova; para começar, ~60 ms seguidos.
             let speaking = Date().timeIntervalSince(self.lastVoiceAt) < 0.3
             if !self.recognizer.hasVAD, isVoice, speaking || self.voiceRun >= Self.voiceOnset { self.lastVoiceAt = Date() }
-            self.levels.removeFirst()
-            self.levels.append(level)
+            self.levelFeed.push(level)
         }
     }
 
@@ -615,6 +625,7 @@ final class Escuta: ObservableObject {
         let isCommand = true
         if capturing != isCommand { capturing = isCommand }
         if utteranceStart == nil { utteranceStart = Date() }
+        if !tickFast { scheduleTick() }
         if phase == .listening { setPhase(.hearing, resetAfter: 1.5) }
         if Wake.leading(w) != nil, lastWakeAt.map({ Date().timeIntervalSince($0) > 2 }) ?? true { lastWakeAt = Date() }
     }
@@ -645,6 +656,24 @@ final class Escuta: ObservableObject {
     /// A tarefa de reconhecimento caiu: o trecho ainda em revisão vira definitivo, para não sumir.
     private func keepVolatileText() {
         if !livePartial.isEmpty { segments.append(livePartial); livePartial = "" }
+    }
+
+    /// O fim de fala e o encerramento precisam do tick a cada 0,2 s; parado, 1 s basta (troca preventiva
+    /// e reconhecedor travado). A janela do Jarvis vence pelo tick marcado no armedUntil.
+    private var tickTimer: Timer?
+    private var tickFast = false
+    private var tickBusy: Bool { utteranceStart != nil || stopping != nil }
+
+    private func scheduleTick() {
+        tickTimer?.invalidate()
+        tickFast = tickBusy
+        tickTimer = Timer.scheduledTimer(withTimeInterval: tickFast ? 0.2 : 1, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.tick()
+                if self.tickFast != self.tickBusy { self.scheduleTick() }
+            }
+        }
     }
 
     @MainActor
@@ -835,6 +864,32 @@ final class Escuta: ObservableObject {
     }
 
     // MARK: Status escrito pelo Claude (claude.jsonl: {"id":1,"state":"recebido"|"respondido","reply":"..."})
+
+    /// Lê o claude.jsonl quando ele muda (evento do sistema de arquivos), em vez de abrir o arquivo a cada 0,4 s.
+    /// Chamado a cada 1 s: só arma a vigia quando o arquivo surge ou foi trocado (apagado, renomeado).
+    private var claudeWatch: DispatchSourceFileSystemObject?
+    private func watchClaudeStatus() {
+        guard claudeWatch == nil else { return }
+        let path = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("claude.jsonl").path
+        let fd = open(path, O_EVTONLY)
+        guard fd >= 0 else { return }
+        let src = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd,
+                                                            eventMask: [.write, .extend, .attrib, .delete, .rename, .revoke],
+                                                            queue: .main)
+        src.setEventHandler { [weak self, weak src] in
+            guard let self, let src else { return }
+            if !src.data.isDisjoint(with: [.delete, .rename, .revoke]) {
+                src.cancel()
+                self.claudeWatch = nil
+                self.watchClaudeStatus()
+            }
+            self.readClaudeStatus()
+        }
+        src.setCancelHandler { close(fd) }
+        claudeWatch = src
+        src.resume()
+        readClaudeStatus()
+    }
 
     private func readClaudeStatus() {
         let url = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("claude.jsonl")

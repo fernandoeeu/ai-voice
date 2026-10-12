@@ -15,9 +15,8 @@ extension Phase {
 
 // MARK: Atualização do painel
 
-/// Freio do painel. O Escuta publica o nível do microfone a cada buffer de áudio (dezenas de vezes
-/// por segundo); observar o modelo direto redesenhava o painel inteiro nesse ritmo, aberto ou não.
-/// Aqui as mudanças viram no máximo ~10 redesenhos por segundo, e só com o painel na tela.
+/// Freio do painel: as mudanças do Escuta viram no máximo ~10 redesenhos por segundo, e só com o painel
+/// na tela. O nível do microfone não passa por aqui: ele tem o LevelFeed, observado só pela onda.
 final class PanelFeed: ObservableObject {
     private var sub: AnyCancellable?
 
@@ -30,6 +29,40 @@ final class PanelFeed: ObservableObject {
     }
 
     func detach() { sub = nil }
+}
+
+/// Nível do microfone para a onda do painel. Cada buffer de áudio grava num anel pré-alocado (sem
+/// alocar e sem publicar); a onda só é publicada com o painel na tela, no máximo 10 vezes por segundo.
+/// Antes o nível era @Published no Escuta e cada buffer avisava o modelo inteiro (ícone e painel).
+final class LevelFeed: ObservableObject {
+    static let count = 56
+    @Published private(set) var levels = [Float](repeating: 0, count: LevelFeed.count)
+    private var ring = [Float](repeating: 0, count: LevelFeed.count)
+    private var head = 0           // próxima posição do anel (a mais antiga)
+    private var dirty = false
+    private var lastPublish: UInt64 = 0
+    private static let interval: UInt64 = 100_000_000   // 100 ms = 10 Hz
+    /// Painel na tela. Fechado, nada é publicado.
+    var visible = false {
+        didSet { if visible && !oldValue { publish() } }
+    }
+
+    /// Thread principal, uma vez por buffer de áudio.
+    func push(_ level: Float) {
+        ring[head] = level
+        head = (head + 1) % Self.count
+        dirty = true
+        guard visible else { return }
+        let now = DispatchTime.now().uptimeNanoseconds
+        if now &- lastPublish >= Self.interval { publish(at: now) }
+    }
+
+    private func publish(at now: UInt64 = DispatchTime.now().uptimeNanoseconds) {
+        lastPublish = now
+        guard dirty else { return }
+        dirty = false
+        levels = Array(ring[head...] + ring[..<head])
+    }
 }
 
 // MARK: Histórico
@@ -81,11 +114,11 @@ enum HistoryItem: Identifiable {
 // MARK: Componentes
 
 struct LevelMeter: View {
-    let levels: [Float]
+    @ObservedObject var feed: LevelFeed
     let tint: Color
     var body: some View {
         Canvas { ctx, size in
-            let bars = levels.suffix(40)
+            let bars = feed.levels.suffix(40)
             let n = bars.count
             guard n > 0 else { return }
             let gap: CGFloat = 2
@@ -223,8 +256,8 @@ struct PanelView: View {
         }
         .padding(16)
         .frame(width: 360)
-        .onAppear { feed.attach(m) }
-        .onDisappear { feed.detach() }
+        .onAppear { feed.attach(m); m.levelFeed.visible = true }
+        .onDisappear { feed.detach(); m.levelFeed.visible = false }
     }
 
     // Estado, microfone e janela do Jarvis.
@@ -266,7 +299,7 @@ struct PanelView: View {
     // Nível de áudio e o que está sendo transcrito agora.
     private var meterCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            LevelMeter(levels: m.levels, tint: m.phase == .paused ? .secondary : stateTint)
+            LevelMeter(feed: m.levelFeed, tint: m.phase == .paused ? .secondary : stateTint)
                 .opacity(m.phase == .paused ? 0.4 : 1)
             Group {
                 if !m.partial.isEmpty {
