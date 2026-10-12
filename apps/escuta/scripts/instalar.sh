@@ -60,7 +60,8 @@ cat > "$PLIST" <<EOF
     <key>ESCUTA_STT</key><string>$(xml "$STT")</string>
     <key>ESCUTA_SILENCIO</key><string>$(xml "$SILENCIO")</string>
     <key>ESCUTA_CONVERSA</key><string>8</string>
-    <key>ESCUTA_SILENCIO_ABERTA</key><string>2.5</string>
+    <key>ESCUTA_SILENCIO_ABERTA</key><string>$(xml "${ESCUTA_SILENCIO_ABERTA:-2.5}")</string>
+    <key>ESCUTA_CONFIANCA_MIN</key><string>$(xml "${ESCUTA_CONFIANCA_MIN:-}")</string>
     <key>ESCUTA_PANE</key><string>$(xml "${ESCUTA_PANE:-}")</string>
     <key>ESCUTA_ORQUESTRADOR</key><string>$(xml "${ESCUTA_ORQUESTRADOR:-}")</string>
     <key>ESCUTA_MIC</key><string>$(xml "${ESCUTA_MIC:-}")</string>
