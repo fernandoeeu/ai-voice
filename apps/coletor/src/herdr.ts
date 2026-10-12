@@ -1,4 +1,5 @@
 import { nomeDoComando, type Processo, somar, type Tabela } from "./processos.ts"
+import type { Subagente, SubagentesDaSessao } from "./subagentes.ts"
 
 /**
  * O retrato do herdr vem de `herdr api snapshot` (socket do servidor). Ele não
@@ -88,7 +89,16 @@ export interface AgenteHerdr {
   readonly rss_bytes: number
   readonly cpu_pct: number
   readonly filhos: UsoProcessos
+  /** sessionId do Claude Code que roda no pane; null quando não é Claude ou não deu para ligar. */
+  readonly sessao: string | null
+  /** Rodando primeiro, depois os mais recentes; no máximo 30. */
+  readonly subagentes: ReadonlyArray<Subagente>
 }
+
+/** Acha a sessão e os subagentes do processo de um agente. */
+export type BuscarSubagentes = (pid: number | null, nomeAgente: string, agora: number) => SubagentesDaSessao
+
+const semSubagentes: BuscarSubagentes = () => ({ sessao: null, subagentes: [] })
 
 export interface EstadoHerdr {
   readonly vivo: boolean
@@ -162,7 +172,8 @@ export const montarHerdr = (
   tabela: Tabela,
   panePorPid: ReadonlyMap<number, string>,
   rastreador: Rastreador,
-  agora: number
+  agora: number,
+  buscarSubagentes: BuscarSubagentes = semSubagentes
 ): EstadoHerdr => {
   const servidor = tabela.encontrar(ehServidorHerdr)
   const chaves = new Set<string>()
@@ -177,6 +188,12 @@ export const montarHerdr = (
     chaves.add(chave)
     const { desde, exato } = rastreador.observar(chave, estado, agora)
     const processo = servidor ? processoDoAgente(tabela, servidor.pid, panePorPid, a.pane_id, tipo) : undefined
+    let doClaude: SubagentesDaSessao
+    try {
+      doClaude = buscarSubagentes(processo?.pid ?? null, nome, agora)
+    } catch {
+      doClaude = { sessao: null, subagentes: [] }
+    }
     const filhos = processo ? somar(tabela.descendentes(processo.pid)) : { processos: 0, rssBytes: 0, cpuPct: 0 }
     return {
       nome,
@@ -193,7 +210,9 @@ export const montarHerdr = (
       comando: processo ? nomeDoComando(processo.comando) : null,
       rss_bytes: processo?.rssBytes ?? 0,
       cpu_pct: processo?.cpuPct ?? 0,
-      filhos: { quantidade: filhos.processos, rss_bytes: filhos.rssBytes, cpu_pct: filhos.cpuPct }
+      filhos: { quantidade: filhos.processos, rss_bytes: filhos.rssBytes, cpu_pct: filhos.cpuPct },
+      sessao: doClaude.sessao,
+      subagentes: doClaude.subagentes
     }
   })
   rastreador.manter(chaves)

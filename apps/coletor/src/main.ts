@@ -12,6 +12,7 @@ import { Cause, Effect, Layer, Logger, Schedule } from "effect"
 import { coletarHerdr, coletarServicos, ColetorConfig, lerProcessos } from "./coleta.ts"
 import { parseLinha, ResumoEscuta } from "./escuta.ts"
 import { herdrFora, Rastreador, type EstadoHerdr } from "./herdr.ts"
+import { LeitorSubagentes } from "./subagentes.ts"
 import { publicarHerdr, registrarEscuta } from "./metricas.ts"
 import type { Servico } from "./servicos.ts"
 import { type Retrato, Vitrine } from "./estado.ts"
@@ -26,6 +27,7 @@ const main = Effect.gen(function*() {
   const vitrine = new Vitrine()
   const resumo = new ResumoEscuta(config.eventos)
   const rastreador = new Rastreador()
+  const subagentes = new LeitorSubagentes({ claudeDir: config.claudeDir })
   let herdr: EstadoHerdr = herdrFora("primeira coleta")
   let servicos: ReadonlyArray<Servico> = []
 
@@ -59,7 +61,7 @@ const main = Effect.gen(function*() {
   const coletar = Effect.gen(function*() {
     const tabela = yield* lerProcessos
     const [h, s] = yield* Effect.all([
-      coletarHerdr(config.herdr, tabela, rastreador),
+      coletarHerdr(config.herdr, tabela, rastreador, subagentes),
       config.servicos ? coletarServicos(config.launchAgents, tabela) : Effect.succeed([])
     ], { concurrency: 2 })
     herdr = h

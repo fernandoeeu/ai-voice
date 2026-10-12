@@ -2,6 +2,7 @@ import { Config, Duration, Effect, Schema } from "effect"
 import { readdirSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
+import { LeitorSubagentes } from "./subagentes.ts"
 import { herdrFora, type EstadoHerdr, montarHerdr, parseSnapshot, pidsParaAmbiente, ehServidorHerdr, Rastreador } from "./herdr.ts"
 import { parsePanePorPid, parsePs, PS_ARGS, Tabela } from "./processos.ts"
 import {
@@ -23,7 +24,8 @@ export const ColetorConfig = Config.all({
   launchAgents: Config.String("JARVIS_LAUNCHAGENTS_DIR").pipe(
     Config.withDefault(join(homedir(), "Library/LaunchAgents"))
   ),
-  servicos: Config.Boolean("JARVIS_COLETOR_SERVICOS").pipe(Config.withDefault(true))
+  servicos: Config.Boolean("JARVIS_COLETOR_SERVICOS").pipe(Config.withDefault(true)),
+  claudeDir: Config.String("JARVIS_CLAUDE_DIR").pipe(Config.withDefault(join(homedir(), ".claude")))
 })
 export type ColetorConfig = Config.Success<typeof ColetorConfig>
 
@@ -64,14 +66,29 @@ const lerPanes = (pids: ReadonlyArray<number>) =>
       Effect.orElseSucceed(() => new Map<number, string>())
     )
 
-export const coletarHerdr = (herdr: string, tabela: Tabela, rastreador: Rastreador): Effect.Effect<EstadoHerdr> =>
+export const coletarHerdr = (
+  herdr: string,
+  tabela: Tabela,
+  rastreador: Rastreador,
+  subagentes?: LeitorSubagentes
+): Effect.Effect<EstadoHerdr> =>
   Effect.gen(function*() {
     const saida = yield* rodar(herdr, ["api", "snapshot"])
     const snapshot = parseSnapshot(saida)
     if (!snapshot) return herdrFora("resposta do herdr sem snapshot")
     const servidor = tabela.encontrar(ehServidorHerdr)
     const panePorPid = servidor ? yield* lerPanes(pidsParaAmbiente(tabela, servidor.pid)) : new Map<number, string>()
-    return montarHerdr(snapshot, tabela, panePorPid, rastreador, Date.now())
+    if (!subagentes) return montarHerdr(snapshot, tabela, panePorPid, rastreador, Date.now())
+    const estado = montarHerdr(
+      snapshot,
+      tabela,
+      panePorPid,
+      rastreador,
+      Date.now(),
+      (pid, nome, agora) => subagentes.doAgente(pid, nome, agora)
+    )
+    subagentes.manter(new Set(estado.agentes.flatMap((a) => a.pid === null ? [] : [a.pid])))
+    return estado
   }).pipe(Effect.catch((e) => Effect.succeed(herdrFora(e.motivo))))
 
 const plistsJarvis = (dir: string): Array<string> => {

@@ -135,6 +135,10 @@ export const agenteFilhos = Metric.gauge("jarvis_herdr_agente_filhos", {
   description: "Quantidade de processos-filho (todos os descendentes) do agente."
 })
 
+export const agenteSubagentes = Metric.gauge("jarvis_herdr_subagentes", {
+  description: "Subagentes do Claude Code da sessão do agente (até 30 listados), por estado (rodando, terminou, parado)."
+})
+
 /** Séries com atributos que mudam (agente, versão): apagadas a cada passada para não ficarem paradas no último valor. */
 const SERIES_VOLATEIS = new Set([
   "jarvis_herdr_info",
@@ -142,8 +146,11 @@ const SERIES_VOLATEIS = new Set([
   "jarvis_herdr_agente_no_estado_segundos",
   "jarvis_herdr_agente_rss_bytes",
   "jarvis_herdr_agente_cpu_pct",
-  "jarvis_herdr_agente_filhos"
+  "jarvis_herdr_agente_filhos",
+  "jarvis_herdr_subagentes"
 ])
+
+const ESTADOS_SUBAGENTE = ["rodando", "terminou", "parado"] as const
 
 export const publicarHerdr = (herdr: EstadoHerdr): Effect.Effect<void> =>
   Effect.gen(function*() {
@@ -159,6 +166,12 @@ export const publicarHerdr = (herdr: EstadoHerdr): Effect.Effect<void> =>
       yield* Metric.update(Metric.withAttributes(agenteEstado, { agente, pane: a.pane, estado: a.estado }), 1)
       yield* Metric.update(Metric.withAttributes(agenteNoEstado, { agente }), a.segundos_no_estado)
       yield* Metric.update(Metric.withAttributes(agenteFilhos, { agente }), a.filhos.quantidade)
+      if (a.sessao !== null) {
+        for (const estado of ESTADOS_SUBAGENTE) {
+          const n = a.subagentes.filter((s) => s.estado === estado).length
+          yield* Metric.update(Metric.withAttributes(agenteSubagentes, { agente, estado }), n)
+        }
+      }
       if (a.pid !== null) {
         yield* Metric.update(Metric.withAttributes(agenteRss, { agente, processo: "agente" }), a.rss_bytes)
         yield* Metric.update(Metric.withAttributes(agenteCpu, { agente, processo: "agente" }), a.cpu_pct)
