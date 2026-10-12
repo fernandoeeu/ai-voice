@@ -39,6 +39,21 @@ struct Server {
         return false
     }
 
+    /// Sobe todos os LaunchAgents dev.jarvis.* de ~/Library/LaunchAgents: carrega os descarregados e dá kickstart
+    /// (sem -k, não mexe no que já está rodando) para voltar quem foi encerrado à mão, como a escuta e o tts.
+    func ensureAllAgents() {
+        let dir = NSHomeDirectory() + "/Library/LaunchAgents"
+        let plists = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? [])
+            .filter { $0.hasPrefix("dev.jarvis.") && $0.hasSuffix(".plist") }
+        for file in plists {
+            let label = String(file.dropLast(".plist".count))
+            if launchctl("print", "\(domain)/\(label)") != 0 {
+                _ = launchctl("bootstrap", domain, dir + "/" + file)
+            }
+            _ = launchctl("kickstart", "\(domain)/\(label)")
+        }
+    }
+
     /// Reinicia o servidor (kickstart -k) e espera ele voltar.
     func restart() async -> Bool {
         _ = launchctl("kickstart", "-k", "\(domain)/\(Server.label)")

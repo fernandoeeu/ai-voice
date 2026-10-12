@@ -92,6 +92,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
     private func connect() {
         guard !connecting else { return }
         connecting = true
+        let server = server
+        Task.detached { server.ensureAllAgents() }
         Task { @MainActor in
             defer { connecting = false }
             if await server.isUp() {
