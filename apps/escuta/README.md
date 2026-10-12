@@ -1,9 +1,11 @@
 # Escuta do Jarvis
 
 App de barra de menus (sem Dock) que ouve sempre, transcreve em pt-BR no próprio Mac
-(SpeechAnalyzer/SpeechTranscriber, on-device) e, quando a frase começa com "Jarvis" ou "camarada",
-manda o pedido inteiro, numa mensagem só, como `[voz do Fernando] ...` para o painel do orquestrador
-no herdr (`wT2:p2`; se o id mudar, o agente chamado `maestro`). Toca um Tink ao enviar.
+(SpeechAnalyzer/SpeechTranscriber, on-device) e manda toda fala com palavras, inteira e numa mensagem só,
+como `[voz do Fernando] ...` para o painel do orquestrador no herdr (`wT2:p2`; se o id mudar, o agente
+chamado `maestro`). Não há palavra de ativação nem filtro de eco: se a frase começar com "Jarvis",
+"camarada" ou algo parecido (Jardes, Jarbas...), só esse prefixo sai. Ruído sem palavras é descartado.
+Toca um Tink ao enviar.
 
 ## Como decide que a fala acabou
 
@@ -12,13 +14,9 @@ no herdr (`wT2:p2`; se o id mudar, o agente chamado `maestro`). Toca um Tink ao 
 - Frase com cara de completa: envia. Frase terminada em conectivo ("e", "que", "pra", "mas",
   "porque"...) ou vírgula: espera até 2,5 s de silêncio. Texto ainda mudando: espera.
 - Só envia texto final; nunca manda fragmento nem "(continuação)".
-- Depois de entregar um pedido, a fala que começar nos 8 s seguintes também é entregue, sem precisar de
-  "Jarvis", como mensagem nova e inteira (uma pausa longa no meio do pedido não perde palavras).
-- Enquanto `~/.local/share/jarvis/fala.lock` está ocupado (o Jarvis falando), a escuta continua ouvindo.
-  Dizer "Jarvis" (ou começar com "para", "espera", "chega") cala o Jarvis na hora: encerra quem segura o
-  lock (lockf, o script do Kokoro, afplay ou say) e segue captando o pedido. Durante a fala só vale o que
-  vem depois de "Jarvis" (sem janela de conversa), e trechos iguais ao texto falado são descartados como eco.
-  O texto falado vem de `~/.local/share/jarvis/fala.txt`, gravado pelo servidor de voz a cada síntese.
+- Enquanto `~/.local/share/jarvis/fala.lock` está ocupado (o Jarvis falando), qualquer fala com palavras
+  corta a fala na hora: encerra quem segura o lock (lockf, o script do Kokoro, afplay ou say), e o que foi
+  dito segue inteiro para o orquestrador. "Para" ou "chega" soltos só calam o Jarvis.
 
 ## Instalar e operar
 
@@ -37,7 +35,7 @@ A captura é só de entrada (AVCaptureSession): não mexe na saída de áudio ne
 Logs: `~/.local/share/jarvis/escuta/logs/escuta.log` (diagnóstico, com a latência de cada pedido)
 e `escuta.events.jsonl` (eventos).
 
-Ajustes no `EnvironmentVariables` do plist: `ESCUTA_SILENCIO` (1.3), `ESCUTA_SILENCIO_ABERTA` (2.5), `ESCUTA_CONVERSA` (8),
+Ajustes no `EnvironmentVariables` do plist: `ESCUTA_SILENCIO` (1.3), `ESCUTA_SILENCIO_ABERTA` (2.5),
 `ESCUTA_MIC` (parte do nome do microfone, padrão `iPhone`, cai no embutido), `ESCUTA_PANE`, `ESCUTA_ORQUESTRADOR`.
 
 Cada binário novo tem assinatura ad hoc diferente: o macOS pode pedir de novo a permissão do microfone.

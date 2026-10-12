@@ -21,6 +21,20 @@ import Testing
         #expect(Wake.command(in: "Pronto, já está feito. Jarvis, obrigado")?.rest == "obrigado")
     }
 
+    @Test func prefixoParecidoComJarvisSai() {
+        #expect(Wake.stripPrefix("Jardes, liga a luz da sala.") == "liga a luz da sala")
+        #expect(Wake.stripPrefix("Jarvas que horas são?") == "que horas são")
+        #expect(Wake.stripPrefix("na verdade muda pra amanhã") == "na verdade muda pra amanhã")
+    }
+
+    @Test func ruidoNaoViraPedido() {
+        #expect(BargeIn.isNoise("."))
+        #expect(BargeIn.isNoise("Hum."))
+        #expect(BargeIn.isNoise("L"))
+        #expect(!BargeIn.isNoise("ok"))
+        #expect(!BargeIn.isNoise("sim"))
+    }
+
     @Test func jarvisSozinho() {
         #expect(Wake.command(in: "Jarvis.")?.rest == "")
     }
@@ -84,37 +98,10 @@ import Testing
 }
 
 @Suite struct BargeInTests {
-    let spoken = "Pronto, a agenda de amanhã tem duas reuniões, uma às nove e outra às três da tarde."
-
-    @Test func ecoDaPropriaVoz() {
-        #expect(BargeIn.isEcho("a agenda de amanhã tem duas reuniões", spoken: spoken))
-        #expect(!BargeIn.isEcho("Jarvis, liga a luz da sala", spoken: spoken))
-    }
-
-    @Test func jarvisInterrompe() {
-        #expect(BargeIn.trigger("Jarvis, espera", spoken: spoken) == "jarvis")
-    }
-
-    @Test func palavraDeParadaNoComeco() {
-        #expect(BargeIn.trigger("chega", spoken: spoken) == "chega")
-        #expect(BargeIn.trigger("Para.", spoken: spoken) == "para")
-        // O próprio Jarvis começando com "Para..." não conta.
-        #expect(BargeIn.trigger("Para isso", spoken: "Para isso eu abri a agenda.") == nil)
-    }
-
-    @Test func ecoSemPalavraNaoInterrompe() {
-        #expect(BargeIn.trigger("a agenda de amanhã", spoken: spoken) == nil)
-    }
-
     @Test func soPararNaoViraPedido() {
         #expect(BargeIn.isOnlyStop("para"))
         #expect(BargeIn.isOnlyStop("espera aí"))
         #expect(!BargeIn.isOnlyStop("para de tocar música na sala"))
-    }
-
-    @Test func pedidoDepoisDoEco() {
-        let c = Wake.lastCommand(in: "duas reuniões uma às nove Jarvis, cancela a das três")
-        #expect(c?.rest == "cancela a das três")
     }
 }
 

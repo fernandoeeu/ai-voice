@@ -3,9 +3,6 @@ import Foundation
 
 /// Quem está falando agora: os processos que seguram o fala.lock (lockf, o script, afplay ou say).
 enum Speaker {
-    static let spokenFile = ProcessInfo.processInfo.environment["ESCUTA_FALA_TXT"]
-        ?? NSHomeDirectory() + "/.local/share/jarvis/fala.txt"
-
     struct Proc { let pid: Int32; let ppid: Int32; let args: String }
 
     private static func run(_ path: String, _ args: [String]) -> String {
@@ -41,21 +38,6 @@ enum Speaker {
             }
         }
         return all.filter { keep.contains($0.pid) }
-    }
-
-    /// O texto que o Jarvis está falando: o que o servidor de voz acabou de sintetizar, ou o argumento do `say`.
-    static func currentText(lock: String) -> String? {
-        if let d = FileManager.default.contents(atPath: spokenFile),
-           let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
-           let ts = (o["ts"] as? NSNumber)?.doubleValue, Date().timeIntervalSince1970 - ts < 30,
-           let t = o["text"] as? String, !t.isEmpty {
-            return t
-        }
-        for p in tree(lock: lock) where p.args.hasPrefix("/usr/bin/say ") || p.args.hasPrefix("say ") {
-            if let r = p.args.range(of: " -- ") { return String(p.args[r.upperBound...]) }
-            return p.args
-        }
-        return nil
     }
 
     /// Cala o Jarvis: SIGTERM nos tocadores e em quem segura o lock (o script não cai para o `say`).

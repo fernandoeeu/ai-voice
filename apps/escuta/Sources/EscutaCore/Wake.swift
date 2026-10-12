@@ -50,5 +50,25 @@ public enum Wake {
         return (r, String(text[r.upperBound...]).trimmingCharacters(in: edgeStrip))
     }
 
+    /// A primeira palavra parece "Jarvis" ou "camarada" (Jardes, Jarbas, Jarvas...)?
+    public static func looksLikeWake(_ word: String) -> Bool {
+        let w = word.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: nil).lowercased()
+        if variants.contains(w) { return true }
+        return w.hasPrefix("jar") && (4...8).contains(w.count) || w.hasPrefix("djar") || w == "camarada"
+    }
+
+    /// O intervalo da palavra de ativação no começo da frase, se houver.
+    public static func prefix(_ text: String) -> Range<String.Index>? {
+        guard let r = text.firstRange(of: #/[\p{L}]+/#), text[..<r.lowerBound].allSatisfy({ !$0.isLetter && !$0.isNumber }),
+              looksLikeWake(String(text[r])) else { return nil }
+        return r
+    }
+
+    /// A frase sem a palavra de ativação no começo e sem pontuação nas pontas.
+    public static func stripPrefix(_ text: String) -> String {
+        let t = prefix(text).map { String(text[$0.upperBound...]) } ?? text
+        return t.trimmingCharacters(in: edgeStrip)
+    }
+
     public static let edgeStrip = CharacterSet.whitespacesAndNewlines.union(.punctuationCharacters)
 }

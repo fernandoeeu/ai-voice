@@ -111,7 +111,6 @@ final class Escuta: ObservableObject {
     private var lastTextChangeAt = Date.distantPast
     private var lastVoiceAt = Date.distantPast
     private var lastEventAt = Date()
-    private var spokenText: String?
     private var bargedIn = false
     private var speechEndedAt = Date.distantPast
     private var overlapped = false
@@ -226,7 +225,7 @@ final class Escuta: ObservableObject {
         let n = Int(out.frameLength)
         DispatchQueue.main.async {
             self.buffersIn += 1
-            if ok { self.framesOut += n } else { self.convErrors += 1 }
+            if ok { self.framesOut += n; self.framesOutTotal += n } else { self.convErrors += 1 }
         }
         if ok, n > 0 { recognizer.feed(out) }
     }
@@ -338,7 +337,7 @@ final class Escuta: ObservableObject {
             self.peakDB = max(self.peakDB, db)
             // Piso de ruído: desce rápido, sobe devagar. Voz = bem acima do piso.
             self.noiseFloor = db < self.noiseFloor ? db : min(db, self.noiseFloor + 0.05)
-            if db > -55, db > self.noiseFloor + 12 { self.lastVoiceAt = Date() }
+            if db > -48, db > self.noiseFloor + 15 { self.lastVoiceAt = Date() }
             self.levels.removeFirst()
             self.levels.append(level)
         }
@@ -381,7 +380,7 @@ final class Escuta: ObservableObject {
     // MARK: Jarvis falando
 
     /// Confere o fala.lock a cada 50 ms. O reconhecedor continua ouvindo enquanto o Jarvis fala,
-    /// para o dono poder interromper; o texto falado serve para reconhecer o eco.
+    /// para o dono poder interromper.
     private func pollSpeechLock() {
         let path = config.speechLock
         lockQueue.async { [weak self] in
@@ -390,16 +389,17 @@ final class Escuta: ObservableObject {
                 let held = SpeechLock.isHeld(path)
                 if held != wasHeld {
                     wasHeld = held
-                    let spoken = held ? Speaker.currentText(lock: path) : nil
                     DispatchQueue.main.async {
                         self.jarvisSpeaking = held
                         if held {
-                            self.spokenText = spoken
                             self.bargedIn = false
                         } else {
                             self.speechEndedAt = Date()
+                            // Reabre a janela de conversa: o dono responde sem dizer "Jarvis".
+                            let until = Date().addingTimeInterval(self.config.conversationWindow)
+                            if (self.armedUntil ?? .distantPast) < until { self.armedUntil = until }
                         }
-                        emit(["type": held ? "jarvis_speaking" : "jarvis_quiet", "text": spoken ?? ""])
+                        emit(["type": held ? "jarvis_speaking" : "jarvis_quiet"])
                     }
                 }
                 Thread.sleep(forTimeInterval: 0.05)
@@ -414,46 +414,39 @@ final class Escuta: ObservableObject {
     @MainActor
     private func checkBargeIn(_ text: String) {
         guard jarvisSpeaking, !bargedIn, !text.isEmpty else { return }
-        // O trecho em revisão pode trazer o eco antes do "Jarvis": julga a partir da palavra de ativação.
-        let candidate = Wake.lastCommand(in: text).map { String(text[$0.wake.lowerBound...]) } ?? text
-        if BargeIn.isEcho(Wake.lastCommand(in: candidate)?.rest ?? candidate, spoken: spokenText) { return }
-        guard let word = BargeIn.trigger(candidate, spoken: spokenText) else { return }
+        // Qualquer fala do dono que não seja eco do que o Jarvis está dizendo interrompe. Sem palavra especial.
+        // Sem filtro de eco, por ordem do dono: qualquer fala com palavras corta a fala do Jarvis.
+        let owner = text
+        guard !BargeIn.isNoise(owner) else { return }
         bargedIn = true
         let path = config.speechLock
+        let t0 = Date()
         // Fila própria: a lockQueue está ocupada para sempre com o laço que vigia o fala.lock.
         DispatchQueue.global(qos: .userInteractive).async {
             let killed = Speaker.stop(lock: path)
+            let ms = Int(Date().timeIntervalSince(t0) * 1000)
             DispatchQueue.main.async {
-                logLine("interrompeu o Jarvis (\"\(word)\"); processos encerrados: \(killed)")
-                emit(["type": "barge_in", "word": word, "heard": text, "killed": killed])
+                logLine("interrompeu o Jarvis em \(ms) ms (ouviu \"\(owner)\"); processos encerrados: \(killed)")
+                emit(["type": "barge_in", "owner": owner, "heard": text, "killed": killed, "kill_ms": ms, "audio_s": Double(self.framesOutTotal) / 16000])
             }
         }
     }
+
+    private var framesOutTotal = 0
+    private var lastSpokenTs: Double = 0
 
     // MARK: Transcrição e fim de fala
 
     /// Decide se a frase vira pedido. arm = "Jarvis" sozinho.
     private func decide(_ text: String, startedAt: Date, overlapped: Bool) -> (wake: Range<String.Index>?, command: String?, arm: Bool) {
-        if overlapped {
-            // Fala misturada com a voz do Jarvis: só vale o que vem depois de "Jarvis"; sem janela de conversa.
-            guard let c = Wake.lastCommand(in: text) else { return (nil, nil, false) }
-            if BargeIn.isEcho(c.rest, spoken: spokenText) { return (nil, nil, false) }
-            // "Jarvis, para" só cala o Jarvis; não vira pedido.
-            if BargeIn.isOnlyStop(c.rest) { return (c.wake, nil, false) }
-            return (c.wake, c.rest.isEmpty ? nil : c.rest, c.rest.isEmpty)
-        }
-        if let c = Wake.command(in: text) {
-            return (c.wake, c.rest.isEmpty ? nil : c.rest, c.rest.isEmpty)
-        }
-        let rest = text.trimmingCharacters(in: Wake.edgeStrip)
-        // Vale quando a fala começou dentro da janela ("Jarvis" sozinho, ou conversa logo depois de um pedido).
-        if let until = armedUntil, startedAt < until { return (nil, rest, false) }
-        if !waiting.isEmpty {
-            // Com alguém esperando resposta, "sim", "pode" ou "não" soltos bastam.
-            let n = Router.norm(text).joined(separator: " ")
-            if Router.yes.contains(n) || Router.no.contains(n) { return (nil, rest, false) }
-        }
-        return (nil, nil, false)
+        // Toda fala com palavras vai ao orquestrador, sem palavra de ativação e sem filtro de eco.
+        let owner = text
+        let wake = Wake.prefix(owner)
+        let rest = Wake.stripPrefix(owner)
+        if BargeIn.isNoise(rest) { return (wake, nil, false) }
+        // "Para", "chega" soltos enquanto o Jarvis falava só calam o Jarvis.
+        if overlapped && BargeIn.isOnlyStop(rest) { return (wake, nil, false) }
+        return (wake, rest, false)
     }
 
     private var whole: String { (segments + [livePartial]).filter { !$0.isEmpty }.joined(separator: " ") }
@@ -483,7 +476,7 @@ final class Escuta: ObservableObject {
         lastTextChangeAt = Date()
         lastPartialAt = Date()
         if inSpeech { overlapped = true }
-        let isCommand = overlapped ? Wake.lastCommand(in: w) != nil : (Wake.leading(w) != nil || armedUntil != nil)
+        let isCommand = true
         if capturing != isCommand { capturing = isCommand }
         if utteranceStart == nil { utteranceStart = Date() }
         if phase == .listening { setPhase(.hearing, resetAfter: 1.5) }
