@@ -138,12 +138,35 @@ impl Nucleo {
 
     /// Enfileira um bloco. Bloqueia (backpressure) se o buffer estiver cheio;
     /// desiste se um `calar` chegar no meio. Retorna `false` se desistiu.
+    ///
+    /// O lock do produtor e tomado por passo (um pedaco por vez) e solto a cada
+    /// espera: `reconstruir` nunca fica preso atras de um produtor em
+    /// backpressure. Se a taxa mudar entre passos, o resto e re-amostrado.
     pub fn enfileirar(&self, fala: FalaId, pcm: &Pcm24k, ultimo: bool) -> bool {
         let pedidos_ini = self.ctl.pedidos.load(Acquire);
-        let Ok(mut p) = self.produtor.lock() else {
-            return false;
+        let (mut saida, mut taxa) = {
+            let Ok(mut p) = self.produtor.lock() else {
+                return false;
+            };
+            (p.converter(pcm), p.taxa)
         };
-        p.enfileirar(fala, pcm, ultimo, pedidos_ini)
+        let mut i = 0;
+        loop {
+            {
+                let Ok(mut p) = self.produtor.lock() else {
+                    return false;
+                };
+                if p.taxa != taxa {
+                    saida = Reamostrador::novo(taxa, p.taxa).processar(&saida[i..]);
+                    i = 0;
+                    taxa = p.taxa;
+                }
+                if let Some(ok) = p.passo(fala, &saida, &mut i, ultimo, pedidos_ini) {
+                    return ok;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     /// Pede `calar` e espera o callback concluir o fade e limpar o buffer.
@@ -165,6 +188,7 @@ impl Nucleo {
 
     /// Troca de taxa/canais (dispositivo novo): re-amostra o que estava no
     /// buffer para a taxa nova e reajusta as marcas. Com o stream parado.
+    /// Nao depende do produtor: `enfileirar` so segura o lock por um passo.
     /// Retorna quantas amostras foram preservadas.
     pub fn reconstruir(&self, nova_taxa: u32, canais: usize) -> usize {
         let (Ok(mut p), Ok(mut c)) = (self.produtor.lock(), self.consumidor.lock()) else {
@@ -221,54 +245,61 @@ impl Produtor {
         ((self.taxa * SEGUNDOS_BUFFER) as usize).min(CAPACIDADE)
     }
 
-    fn enfileirar(&mut self, fala: FalaId, pcm: &Pcm24k, ultimo: bool, pedidos_ini: u64) -> bool {
+    /// Converte o bloco para mono f32 na taxa do dispositivo.
+    fn converter(&mut self, pcm: &Pcm24k) -> Vec<f32> {
         let mono: Vec<f32> = pcm
             .amostras
             .iter()
             .map(|&s| f32::from(s) / 32768.0)
             .collect();
-        let saida = if pcm.taxa == self.taxa {
-            mono
-        } else {
-            if self.reamostrador.as_ref().map(Reamostrador::taxas) != Some((pcm.taxa, self.taxa)) {
-                self.reamostrador = Some(Reamostrador::novo(pcm.taxa, self.taxa));
-            }
-            self.reamostrador
-                .as_mut()
-                .map(|r| r.processar(&mono))
-                .unwrap_or_default()
-        };
-        let cancelado = |ctl: &Controle| ctl.pedidos.load(Acquire) != pedidos_ini;
+        if pcm.taxa == self.taxa {
+            return mono;
+        }
+        if self.reamostrador.as_ref().map(Reamostrador::taxas) != Some((pcm.taxa, self.taxa)) {
+            self.reamostrador = Some(Reamostrador::novo(pcm.taxa, self.taxa));
+        }
+        self.reamostrador
+            .as_mut()
+            .map(|r| r.processar(&mono))
+            .unwrap_or_default()
+    }
 
+    /// Um passo do enfileiramento, com o lock tomado: marca de inicio, o
+    /// quanto couber de `saida[*i..]` e, no fim, a marca de fim. `None` = falta
+    /// espaco (quem chama solta o lock e tenta de novo); `Some(ok)` = acabou.
+    fn passo(
+        &mut self,
+        fala: FalaId,
+        saida: &[f32],
+        i: &mut usize,
+        ultimo: bool,
+        pedidos_ini: u64,
+    ) -> Option<bool> {
+        if self.ctl.pedidos.load(Acquire) != pedidos_ini {
+            return Some(false);
+        }
         if !saida.is_empty() && self.fala_vista != Some(fala) {
             let m = Marca {
                 pos: self.escritas,
                 fala,
                 tipo: TipoMarca::Inicio,
             };
-            if !self.empurrar_marca(m, pedidos_ini) {
-                return false;
-            }
+            self.marcas.push(m).ok()?;
             self.fala_vista = Some(fala);
         }
-        let mut i = 0;
-        while i < saida.len() {
-            let ocupado = CAPACIDADE - self.amostras.slots();
-            let livre = self.limite().saturating_sub(ocupado);
-            if livre == 0 {
-                if cancelado(&self.ctl) {
-                    return false;
-                }
-                std::thread::sleep(Duration::from_millis(1));
-                continue;
-            }
-            let n = livre.min(saida.len() - i);
-            for &v in &saida[i..i + n] {
+        let ocupado = CAPACIDADE - self.amostras.slots();
+        let livre = self.limite().saturating_sub(ocupado);
+        let n = livre.min(saida.len() - *i);
+        if n > 0 {
+            for &v in &saida[*i..*i + n] {
                 let _ = self.amostras.push(v);
             }
-            i += n;
+            *i += n;
             self.escritas += n as u64;
             self.ctl.escritas.store(self.escritas, Release);
+        }
+        if *i < saida.len() {
+            return None;
         }
         if ultimo {
             let m = Marca {
@@ -276,22 +307,10 @@ impl Produtor {
                 fala,
                 tipo: TipoMarca::Fim,
             };
+            self.marcas.push(m).ok()?;
             self.fala_vista = None;
-            return self.empurrar_marca(m, pedidos_ini);
         }
-        true
-    }
-
-    fn empurrar_marca(&mut self, m: Marca, pedidos_ini: u64) -> bool {
-        loop {
-            if self.marcas.push(m).is_ok() {
-                return true;
-            }
-            if self.ctl.pedidos.load(Acquire) != pedidos_ini {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        Some(true)
     }
 }
 
