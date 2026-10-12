@@ -52,7 +52,7 @@ const EXIT_NOT_FOUND = 4
 const EXIT_NO_ANSWER = 5
 
 const PERMISSION_HINT =
-  "Allow Full Access for the app that runs Jarvis (your terminal, or the process started by launchd) in System Settings > Privacy & Security > Calendars, then try again."
+  "Allow Full Access for \"calendar-events\" (the Jarvis helper) in System Settings > Privacy & Security > Calendars, then try again."
 
 const describeFailure = ({ exitCode, stderr }: Completed, calendar: string | undefined): string => {
   switch (Number(exitCode)) {

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Instala ou atualiza o Jarvis como app sempre ligado no Mac.
 #
-# Faz o build de produção, copia para apps/dashboard/.local/app (fora do build/
+# Faz o build de produção, compila o helper do Calendário, copia para apps/dashboard/.local/app (fora do build/
 # para que um `bun run build` posterior não mexa no servidor em execução),
 # grava ~/Library/LaunchAgents/dev.jarvis.dashboard.plist e reinicia o serviço.
 #
@@ -28,6 +28,11 @@ if [ "${1:-}" != "--skip-build" ]; then
 	(cd "$APP_DIR" && "$BUN" run build)
 fi
 [ -f "$APP_DIR/build/index.js" ] || { echo "build/index.js não existe; rode sem --skip-build." >&2; exit 1; }
+
+# O build empacotado não leva os fontes Swift do helper do Calendário; o servidor
+# usa o binário já compilado em ~/.local/share/jarvis/bin/calendar-events.
+echo "==> Helper do Calendário"
+(cd "$APP_DIR/../../packages/apple" && "$BUN" run build:native)
 
 echo "==> Publicando o build em $RELEASE_DIR"
 mkdir -p "$APP_DIR/.local"

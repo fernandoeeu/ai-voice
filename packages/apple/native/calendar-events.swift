@@ -12,6 +12,7 @@
 // not found, 5 the access request did not complete. Requires macOS 14+
 // (`requestFullAccessToEvents`).
 
+import Darwin
 import EventKit
 import Foundation
 
@@ -82,8 +83,7 @@ func parseArguments(_ argv: [String]) -> Options {
 // write-only ("Add Events Only") access was granted: the system shows the
 // upgrade prompt once. A recorded denial is reported right away instead of
 // waiting for a prompt that will never show. TCC attributes the request to the
-// responsible process (the terminal app or launchd job that started the
-// server), so the grant is the one listed under that app in System Settings.
+// responsible process, which `runDisclaimed` makes this helper itself.
 func ensureAccess(_ store: EKEventStore) {
   let status = EKEventStore.authorizationStatus(for: .event)
   if status == .fullAccess { return }
@@ -103,6 +103,46 @@ func ensureAccess(_ store: EKEventStore) {
   }
 }
 
+// macOS attributes Calendar access to the "responsible" process. Started by a
+// terminal that is the terminal app; started by launchd it is the server's own
+// binary (bun), whose hardened runtime lacks the calendars entitlement, so tccd
+// denies without ever prompting. Re-running this helper once with its
+// responsibility disclaimed makes the helper itself (dev.jarvis.calendar-events,
+// with the usage strings of its embedded Info.plist) the app macOS asks about
+// and lists under Privacy & Security > Calendars, wherever the server runs.
+// `responsibility_spawnattrs_setdisclaim` is the libSystem call Chromium and
+// LLDB use for this; when it is missing the helper simply runs in place.
+let DISCLAIMED = "JARVIS_CALENDAR_HELPER_DISCLAIMED"
+
+func runDisclaimed() {
+  guard getenv(DISCLAIMED) == nil,
+        let executable = Bundle.main.executablePath,
+        let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_spawnattrs_setdisclaim")
+  else { return }
+  typealias SetDisclaim = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32
+  let setDisclaim = unsafeBitCast(symbol, to: SetDisclaim.self)
+  var attributes: posix_spawnattr_t?
+  guard posix_spawnattr_init(&attributes) == 0 else { return }
+  defer { posix_spawnattr_destroy(&attributes) }
+  guard setDisclaim(&attributes, 1) == 0 else { return }
+  setenv(DISCLAIMED, "1", 1)
+  var pid: pid_t = 0
+  // Same argv, environment, stdin, stdout and stderr; same process group, so
+  // the caller's deadline still kills both.
+  guard posix_spawn(&pid, executable, nil, &attributes, CommandLine.unsafeArgv, environ) == 0 else {
+    unsetenv(DISCLAIMED)
+    return
+  }
+  var status: Int32 = 0
+  while waitpid(pid, &status, 0) == -1 {
+    if errno != EINTR { fail(1, "lost the disclaimed helper") }
+  }
+  let signal = status & 0x7f
+  if signal == 0 { exit((status >> 8) & 0xff) }
+  fail(1, "the disclaimed helper was killed by signal \(signal)")
+}
+
+runDisclaimed()
 let options = parseArguments(Array(CommandLine.arguments.dropFirst()))
 let store = EKEventStore()
 ensureAccess(store)
