@@ -138,6 +138,7 @@ final class Escuta: ObservableObject {
             Timer.scheduledTimer(withTimeInterval: 1.5, repeats: true) { [weak self] _ in self?.refreshWaiting() }
         }
         pollSpeechLock()
+        handleTerm()
     }
 
     // MARK: Ciclo de vida
@@ -307,14 +308,61 @@ final class Escuta: ObservableObject {
         lastRestart = Date()
         emit(["type": "restart", "reason": reason, "in": delay])
         logLine("reiniciando o processo: \(reason)")
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { exit(75) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in self?.shutdown(code: 75, reason: reason) }
     }
 
     /// Sai de verdade (código 0): o LaunchAgent só reabre depois de falha ou no próximo login.
     func quit() {
-        emit(["type": "stopped", "reason": "Sair"])
         logLine("encerrada pelo Sair")
-        exit(0)
+        MainActor.assumeIsolated { shutdown(code: 0, reason: "Sair") }
+    }
+
+    // MARK: Encerramento sem perder fala
+
+    /// SIGTERM (launchctl bootout, reinstalação, logout) passa pelo mesmo encerramento cuidadoso.
+    private var termSource: DispatchSourceSignal?
+    private func handleTerm() {
+        signal(SIGTERM, SIG_IGN)
+        let src = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        src.setEventHandler { [weak self] in MainActor.assumeIsolated { self?.shutdown(code: 0, reason: "SIGTERM") } }
+        src.resume()
+        termSource = src
+    }
+
+    /// Pedido de saída com alguém falando: espera a frase terminar (fim de fala normal, que envia),
+    /// e só então sai. Passou do limite, envia o que tiver. Sem isso, o começo da frase morria com o processo.
+    private struct Stopping { let code: Int32; let reason: String; let since: Date; let deadline: Date }
+    private var stopping: Stopping?
+    private var exiting = false
+
+    @MainActor
+    func shutdown(code: Int32, reason: String, grace: TimeInterval = 20) {
+        guard stopping == nil else { return }
+        let now = Date()
+        stopping = Stopping(code: code, reason: reason, since: now, deadline: now.addingTimeInterval(grace))
+        let talking = utteranceStart != nil || now.timeIntervalSince(lastVoiceAt) < 1.5
+        logLine("encerrando (\(reason))" + (talking ? "; espero a fala em curso terminar" : ""))
+        checkShutdown()
+    }
+
+    @MainActor
+    private func checkShutdown() {
+        guard let s = stopping, !exiting else { return }
+        let now = Date()
+        // Voz no microfone sem texto ainda: o reconhecedor atrasa ~2 s, dá até 3 s para o texto aparecer.
+        let voiceWithoutText = utteranceStart == nil && now.timeIntervalSince(lastVoiceAt) < 1.5
+            && now.timeIntervalSince(s.since) < 3
+        if (utteranceStart != nil || voiceWithoutText) && now < s.deadline { return }
+        exiting = true
+        if !(segments.isEmpty && livePartial.isEmpty) { flush(reason: "encerramento") }
+        let waited = Int(now.timeIntervalSince(s.since) * 1000)
+        // O envio ao herdr roda na fila do roteador: sai depois dele.
+        router.q.async {
+            DispatchQueue.main.async {
+                emit(["type": "stopped", "reason": s.reason, "code": Int(s.code), "waited_ms": waited])
+                exit(s.code)
+            }
+        }
     }
 
     private func fail(_ msg: String) {
@@ -351,19 +399,46 @@ final class Escuta: ObservableObject {
         }
         let nc = NotificationCenter.default
         nc.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: nil, queue: .main) { [weak self] n in
+            guard let self else { return }
             let e = n.userInfo?[AVCaptureSessionErrorKey] as? NSError
-            self?.restart(reason: "erro na captura: \(e?.localizedDescription ?? "?")")
+            // Erro porque o microfone saiu: troca para o próximo da lista em vez de reiniciar.
+            if let d = self.mic.device, !d.isConnected { self.reselectMic("erro na captura com \(d.localizedName) desconectado"); return }
+            self.restart(reason: "erro na captura: \(e?.localizedDescription ?? "?")")
         }
         nc.addObserver(forName: AVCaptureDevice.wasDisconnectedNotification, object: nil, queue: .main) { [weak self] n in
             guard let self, let d = n.object as? AVCaptureDevice, d.uniqueID == self.mic.device?.uniqueID else { return }
-            self.restart(reason: "microfone \(d.localizedName) desconectou")
+            self.reselectMic("\(d.localizedName) desconectou")
         }
         nc.addObserver(forName: AVCaptureDevice.wasConnectedNotification, object: nil, queue: .main) { [weak self] n in
-            guard let self, let d = n.object as? AVCaptureDevice, !MicCapture.isBluetooth(d),
-                  d.localizedName.localizedCaseInsensitiveContains(self.config.micHint),
-                  !self.micName.localizedCaseInsensitiveContains(self.config.micHint) else { return }
-            self.restart(reason: "microfone \(d.localizedName) voltou")
+            guard let self, let d = n.object as? AVCaptureDevice, !MicCapture.isBluetooth(d) else { return }
+            // Pode chegar antes do aparelho estar pronto: tenta de novo logo depois.
+            self.reselectMic("\(d.localizedName) conectou")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in self?.reselectMic("\(d.localizedName) conectou") }
         }
+    }
+
+    /// Captura sempre do melhor microfone presente na ordem do ESCUTA_MIC (HyperX, iPhone, MacBook),
+    /// trocando na hora quando um aparelho entra ou sai.
+    private func reselectMic(_ why: String) {
+        guard audioStartedAt != nil, config.audioFile == nil else { return }
+        guard let best = MicCapture.pick(hint: config.micHint) else {
+            fail("Nenhum microfone encontrado")
+            restart(reason: "sem microfone", after: 15)
+            return
+        }
+        if let cur = mic.device, cur.uniqueID == best.uniqueID, cur.isConnected { return }
+        let from = micName
+        do {
+            try mic.switchTo(best)
+        } catch {
+            restart(reason: "troca de microfone falhou: \(error.localizedDescription)")
+            return
+        }
+        micName = best.localizedName
+        formats = "mic \(best.localizedName) → 16000 Hz"
+        if phase == .error { phase = .listening; errorText = nil }
+        logLine("captura: mic \(best.localizedName) (troca: \(why))")
+        emit(["type": "mic", "from": from, "to": best.localizedName, "reason": why])
     }
 
     private func checkAirPods() {
@@ -540,8 +615,10 @@ final class Escuta: ObservableObject {
             case .close(let reason):
                 flush(reason: reason)
             }
+            checkShutdown()
             return
         }
+        checkShutdown()
         guard audioStartedAt != nil, !gate.paused else { return }
         // Ninguém falando: troca preventiva da tarefa de reconhecimento, ou troca porque ela parou de responder.
         let quiet = now.timeIntervalSince(lastTextChangeAt) > 5 && now.timeIntervalSince(lastVoiceAt) > 3

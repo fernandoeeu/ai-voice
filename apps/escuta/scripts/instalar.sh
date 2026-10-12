@@ -66,6 +66,7 @@ cat > "$PLIST" <<EOF
     <key>SuccessfulExit</key><false/>
   </dict>
   <key>ThrottleInterval</key><integer>5</integer>
+  <key>ExitTimeOut</key><integer>30</integer>
   <key>ProcessType</key><string>Interactive</string>
   <key>LimitLoadToSessionType</key><string>Aqua</string>
   <key>StandardOutPath</key><string>$STATE/logs/escuta.events.jsonl</string>
@@ -78,8 +79,9 @@ echo "LaunchAgent gravado em $PLIST"
 
 if [ "${1:-}" = "--carregar" ]; then
   launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null || true
-  # bootout termina em segundo plano: espera o job sumir antes do bootstrap.
-  for _ in $(seq 1 50); do launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || break; sleep 0.2; done
+  # bootout termina em segundo plano: espera o job sumir antes do bootstrap. A escuta só sai
+  # depois que a frase em curso termina e é enviada (até ~20 s), então a espera é longa.
+  for _ in $(seq 1 175); do launchctl print "gui/$(id -u)/$LABEL" >/dev/null 2>&1 || break; sleep 0.2; done
   launchctl bootstrap "gui/$(id -u)" "$PLIST"
   echo "LaunchAgent carregado"
 fi

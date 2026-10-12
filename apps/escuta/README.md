@@ -36,9 +36,11 @@ Logs: `~/.local/share/jarvis/escuta/logs/escuta.log` (diagnóstico, com a latên
 e `escuta.events.jsonl` (eventos).
 
 Ajustes no `EnvironmentVariables` do plist: `ESCUTA_SILENCIO` (1.3), `ESCUTA_SILENCIO_ABERTA` (2.5),
-`ESCUTA_MIC` (parte do nome do microfone, padrão `iPhone`, cai no embutido), `ESCUTA_PANE`, `ESCUTA_ORQUESTRADOR`.
+`ESCUTA_MIC` (partes do nome dos microfones em ordem de preferência, separadas por vírgula, padrão `HyperX,iPhone,MacBook`; troca na hora quando um aparelho entra ou sai, e nenhum presente cai no embutido), `ESCUTA_PANE`, `ESCUTA_ORQUESTRADOR`.
 
-Cada binário novo tem assinatura ad hoc diferente: o macOS pode pedir de novo a permissão do microfone.
+Reiniciar, Sair, `launchctl bootout` ou reinstalar não cortam frase: com alguém falando, a escuta espera a frase terminar e a envia antes de sair (até 20 s; o LaunchAgent tem `ExitTimeOut` 30).
+
+O app é assinado com a identidade local "Jarvis Local Signing" (`JARVIS_SIGNING_IDENTITY`), então as permissões de microfone e fala sobrevivem a novas compilações; sem a identidade, cai em assinatura ad hoc e o macOS pode pedir de novo.
 
 ## Testar sem microfone
 

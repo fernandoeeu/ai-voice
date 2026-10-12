@@ -21,12 +21,24 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
         return t == kAudioDeviceTransportTypeBluetooth || t == kAudioDeviceTransportTypeBluetoothLE
     }
 
-    /// O microfone com o nome pedido; senão o embutido. Nunca um Bluetooth (abrir o mic dos AirPods
-    /// derruba eles para o modo chamada).
+    /// Nomes em ordem de preferência, separados por vírgula ("HyperX,iPhone").
+    static func hints(_ hint: String) -> [String] {
+        hint.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+    }
+
+    /// Posição do microfone na lista de preferência (menor é melhor); nil se não está na lista.
+    static func rank(_ name: String, hint: String) -> Int? {
+        hints(hint).firstIndex { name.localizedCaseInsensitiveContains($0) }
+    }
+
+    /// O primeiro microfone presente da lista; senão o embutido. Nunca um Bluetooth (abrir o mic dos
+    /// AirPods derruba eles para o modo chamada).
     static func pick(hint: String) -> AVCaptureDevice? {
         let all = inputs().filter { !isBluetooth($0) }
-        return all.first { $0.localizedName.localizedCaseInsensitiveContains(hint) }
-            ?? all.first { UInt32(bitPattern: $0.transportType) == kAudioDeviceTransportTypeBuiltIn }
+        for h in hints(hint) {
+            if let d = all.first(where: { $0.localizedName.localizedCaseInsensitiveContains(h) }) { return d }
+        }
+        return all.first { UInt32(bitPattern: $0.transportType) == kAudioDeviceTransportTypeBuiltIn }
             ?? all.first
     }
 
@@ -48,6 +60,23 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
         session.addOutput(output)
         session.commitConfiguration()
         session.startRunning()
+    }
+
+    /// Troca o microfone com a captura no ar (aparelho entrou ou saiu), sem reiniciar o processo.
+    func switchTo(_ d: AVCaptureDevice) throws {
+        let input = try AVCaptureDeviceInput(device: d)
+        session.beginConfiguration()
+        let old = session.inputs
+        old.forEach { session.removeInput($0) }
+        guard session.canAddInput(input) else {
+            old.forEach { if session.canAddInput($0) { session.addInput($0) } }
+            session.commitConfiguration()
+            throw err("não deu para usar \(d.localizedName)")
+        }
+        session.addInput(input)
+        session.commitConfiguration()
+        device = d
+        if !session.isRunning { session.startRunning() }
     }
 
     func stop() { session.stopRunning() }

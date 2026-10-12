@@ -8,8 +8,8 @@ struct Config {
     var armedWindow: Double = 60
     /// Depois de entregar um pedido, fala começada até este tempo também é pedido (mensagem nova, inteira).
     var conversationWindow: Double = 8
-    /// Microfone escolhido pelo nome; sem ele, o embutido do Mac.
-    var micHint = "iPhone"
+    /// Microfones em ordem de preferência (parte do nome, separados por vírgula); nenhum presente, o embutido.
+    var micHint = "HyperX,iPhone,MacBook"
     /// Painel do herdr do orquestrador.
     var pane = "wT2:p2"
     /// Nome do agente do orquestrador no herdr, usado se o painel mudar de id.
