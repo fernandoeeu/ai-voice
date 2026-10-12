@@ -1,16 +1,19 @@
 import { Config, Duration, Effect, Schema } from "effect"
-import { readdirSync } from "node:fs"
+import { readdirSync, readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
 import { LeitorSubagentes } from "./subagentes.ts"
 import { herdrFora, type EstadoHerdr, montarHerdr, parseSnapshot, pidsParaAmbiente, ehServidorHerdr, Rastreador } from "./herdr.ts"
 import { parsePanePorPid, parsePs, PS_ARGS, Tabela } from "./processos.ts"
 import {
+  type Agenda,
   type DetalheLaunchctl,
   montarServicos,
+  parseAgendaPlist,
   parseLaunchctlList,
   parseLaunchctlPrint,
   PREFIXO,
+  type RelogioExecucoes,
   type Servico
 } from "./servicos.ts"
 
@@ -101,7 +104,42 @@ const plistsJarvis = (dir: string): Array<string> => {
   }
 }
 
-export const coletarServicos = (launchAgents: string, tabela: Tabela): Effect.Effect<Array<Servico>> =>
+const lerAgendas = (dir: string, labels: ReadonlyArray<string>): Map<string, Agenda> => {
+  const agendas = new Map<string, Agenda>()
+  for (const label of labels) {
+    try {
+      const agenda = parseAgendaPlist(readFileSync(join(dir, `${label}.plist`), "utf8"))
+      if (agenda) agendas.set(label, agenda)
+    } catch {
+      // plist ilegível ou binário: o `run interval` do launchctl print ainda cobre o StartInterval.
+    }
+  }
+  return agendas
+}
+
+const mtimeMs = (path: string | null): number | null => {
+  if (path === null) return null
+  try {
+    return statSync(path).mtimeMs
+  } catch {
+    return null
+  }
+}
+
+const lerLogsMs = (detalhes: ReadonlyMap<string, DetalheLaunchctl>): Map<string, number> => {
+  const logs = new Map<string, number>()
+  for (const [label, d] of detalhes) {
+    const ms = Math.max(mtimeMs(d.stdout) ?? 0, mtimeMs(d.stderr) ?? 0)
+    if (ms > 0) logs.set(label, Math.round(ms))
+  }
+  return logs
+}
+
+export const coletarServicos = (
+  launchAgents: string,
+  tabela: Tabela,
+  relogio?: RelogioExecucoes
+): Effect.Effect<Array<Servico>> =>
   Effect.gen(function*() {
     const lista = parseLaunchctlList(yield* rodar("/bin/launchctl", ["list"]).pipe(Effect.orElseSucceed(() => "")))
     const uid = process.getuid?.() ?? 501
@@ -115,5 +153,10 @@ export const coletarServicos = (launchAgents: string, tabela: Tabela): Effect.Ef
         ),
       { concurrency: 4, discard: true }
     )
-    return montarServicos(plistsJarvis(launchAgents), lista, detalhes, tabela)
+    const plists = plistsJarvis(launchAgents)
+    return montarServicos(plists, lista, detalhes, tabela, {
+      agendas: lerAgendas(launchAgents, plists),
+      logsMs: lerLogsMs(detalhes),
+      ...(relogio ? { relogio } : {})
+    })
   })

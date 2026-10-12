@@ -14,7 +14,7 @@ import { parseLinha, ResumoEscuta } from "./escuta.ts"
 import { herdrFora, Rastreador, type EstadoHerdr } from "./herdr.ts"
 import { LeitorSubagentes } from "./subagentes.ts"
 import { publicarHerdr, registrarEscuta } from "./metricas.ts"
-import type { Servico } from "./servicos.ts"
+import { RelogioExecucoes, type Servico } from "./servicos.ts"
 import { type Retrato, Vitrine } from "./estado.ts"
 import { criarServidor } from "./servidor.ts"
 import { Seguidor, ultimasLinhas } from "./tail.ts"
@@ -30,6 +30,7 @@ const main = Effect.gen(function*() {
   const subagentes = new LeitorSubagentes({ claudeDir: config.claudeDir })
   let herdr: EstadoHerdr = herdrFora("primeira coleta")
   let servicos: ReadonlyArray<Servico> = []
+  const relogio = new RelogioExecucoes()
 
   const montar = (): Retrato => ({
     gerado_em: new Date().toISOString(),
@@ -62,7 +63,7 @@ const main = Effect.gen(function*() {
     const tabela = yield* lerProcessos
     const [h, s] = yield* Effect.all([
       coletarHerdr(config.herdr, tabela, rastreador, subagentes),
-      config.servicos ? coletarServicos(config.launchAgents, tabela) : Effect.succeed([])
+      config.servicos ? coletarServicos(config.launchAgents, tabela, relogio) : Effect.succeed([])
     ], { concurrency: 2 })
     herdr = h
     servicos = s

@@ -6,7 +6,7 @@
  * Ao iniciar, e a cada minuto, garante o backend: se o coletor OTLP não responde, liga o OrbStack
  * (quando existe) e roda `docker compose up -d` no services/telemetria/compose.yaml.
  *
- *   jarvis_servico_vivo{servico}             1 rodando, 0 parado ou ausente
+ *   jarvis_servico_vivo{servico}             1 rodando (ou periódico cuja última saída foi 0), 0 parado ou ausente
  *   jarvis_servico_execucoes{servico}        "runs" do launchd: sobe a cada (re)início
  *   jarvis_servico_ultimo_codigo_saida{servico}
  *   jarvis_servico_http_ok{servico}          1 quando o endpoint responde abaixo de 500
@@ -102,8 +102,10 @@ const launchd = (label: string) =>
       const campo = (nome: string) => new RegExp(`^\\t${nome} = (.+)$`, "m").exec(stdout)?.[1]?.trim()
       const pid = Number(campo("pid"))
       const ultimo = Number(campo("last exit code"))
+      // Periódico (StartInterval): sem processo entre as execuções é o normal; saudável se a última saiu com 0.
+      const periodico = campo("run interval") !== undefined
       return {
-        rodando: campo("state") === "running",
+        rodando: campo("state") === "running" || (periodico && Number.isFinite(ultimo) && ultimo === 0),
         pid: Number.isFinite(pid) && pid > 0 ? pid : undefined,
         runs: Number(campo("runs")) || 0,
         ultimo: Number.isFinite(ultimo) ? ultimo : 0
