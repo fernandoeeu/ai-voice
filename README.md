@@ -1,219 +1,274 @@
-![Claude + Echo: your AI coding agent, now with a voice](https://raw.githubusercontent.com/henriquearthur/ai-voice/main/assets/claude-echo.png)
-
 # Jarvis
 
-An [MCP](https://modelcontextprotocol.io) server that lets AI agents talk to you out loud through your Amazon Echo, in the Alexa voice, plus a small dashboard around it.
+**O Jarvis mora no seu Mac.** Ele escuta o que você fala, entrega o pedido aos agentes de código que estão trabalhando no herdr e responde em voz alta, no Mac ou na Echo da sala. Tem um super app com a conversa, a agenda e a telemetria, um maestro que nunca desliga e um painel que mostra cada serviço respirando.
 
-Ask Claude Code or Codex to "tell me when the build is done", walk away from the screen, and hear the answer from the Echo in the room. It works with any client that speaks MCP.
-
-```text
-you    > run the migration and tell me out loud how it went
-agent  > (calls speak) "Migration finished. All 42 tables were updated and the tests pass."
-```
+Você fala "Jarvis, roda os testes e me avisa", levanta da cadeira e ouve a resposta quando ela fica pronta. Sem palavra de ativação na nuvem, sem gravar nada fora do Mac: a transcrição é no próprio aparelho.
 
 > [!NOTE]
-> Jarvis is a fork of [AI Voice](https://github.com/henriquearthur/ai-voice) by Henrique Arthur (MIT). The original project is the one to credit for the idea and the first implementation. This fork restructures it as a Bun + Turborepo monorepo and adds a dashboard.
+> O Jarvis nasceu como fork do [AI Voice](https://github.com/henriquearthur/ai-voice), de Henrique Arthur (MIT), que teve a ideia original de dar voz aos agentes pela Echo. Aqui ele virou um monorepo Bun + Turborepo, com Effect 4 e SvelteKit, e cresceu em escuta, maestro, app nativo e telemetria.
 
-Voice tools, available on both transports:
+## Como a voz flui
 
-| Tool | What it does |
-| --- | --- |
-| `list_devices` | Lists the physical Echo devices on your Amazon account. Plays no audio. |
-| `speak` | Speaks up to 4000 characters of plain text on one Echo. Uses your default Echo when `device_serial` is omitted. |
+```text
+  você fala
+     │
+     ▼
+┌──────────────┐  transcreve no Mac (pt-BR)  ┌──────────────────────┐
+│    Escuta    │ ─────────────────────────▶ │  herdr: o maestro e  │
+│ barra de menu│   "[voz do ...] pedido"     │  os agentes de código│
+└──────────────┘                             └──────────┬───────────┘
+     ▲  corta a fala do Jarvis                          │ chamam as tools do MCP
+     │  quando você interrompe                          ▼
+     │                                       ┌──────────────────────┐
+     │                                       │  MCP ai-voice        │
+     │                                       │  speak · grokbot_send│
+     │                                       └──────────┬───────────┘
+     │                                                  │
+     │                      ┌───────────────────────────┼──────────────────┐
+     │                      ▼                           ▼                  ▼
+     │            Kokoro local (7349)            Echo (Alexa)        Grok Bot
+     └──────────  fala no Mac, ou `say`          opcional            resposta volta
+                                                                     pelo callback (7348)
 
-Mac tools, available **only over stdio** (the HTTP endpoint has no authentication, so it stays voice-only): `reminders_lists`, `reminders_list`, `reminders_add`, `calendar_today`, `calendar_events`, `calendar_calendars`, `maps_search`, `maps_directions` and `phone_call`. They drive Reminders, Calendar and Maps through `osascript`, and `phone_call` hands a number to macOS, which asks you to confirm before dialing. See the [configuration reference](docs/configuration.md#tools).
-
-> [!IMPORTANT]
-> Jarvis is an unofficial, community project. It is not affiliated with or endorsed by Amazon, and it relies on the private APIs the Alexa app uses, through [`alexa-remote2`](https://github.com/Apollon77/alexa-remote). Amazon can change those APIs at any time. Read [How the Alexa integration works](docs/alexa-integration.md) before trusting it with your account.
-
-## Install on a Mac (one command)
-
-On macOS, one script installs and wires everything for the current user. It is idempotent: run it again after a `git pull` to update. Until the Jarvis pull request is merged, check it out after cloning with `gh pr checkout <number>`.
-
-```sh
-git clone https://github.com/henriquearthur/ai-voice.git jarvis
-cd jarvis
-./scripts/setup.sh --dry-run   # shows what it would do, changes nothing
-./scripts/setup.sh
+  Coletor (7352) observa a escuta e o herdr ──▶ OTLP (4318) ──▶ Grafana (7351) e a aba Telemetria
 ```
 
-It checks the prerequisites and says what is missing, runs `bun install`, then installs:
+## O que tem aqui
 
-| Piece | Where | What it does |
-| --- | --- | --- |
-| Local voice server (Kokoro) | `~/.local/share/jarvis/tts`, LaunchAgent `dev.jarvis.tts` on `127.0.0.1:7349` | Natural pt-BR speech on the Mac with [Kokoro-82M](https://huggingface.co/mlx-community/Kokoro-82M-bf16) through `mlx-audio`. Creates a Python 3.12 venv from `services/tts/requirements.lock.txt` and downloads the model with only the pt-BR voices (about 330 MB). Apple Silicon only; without it the Mac speaks with `say`. |
-| Speech commands | `~/.local/bin/jarvis-fala`, `jarvis-fala-resposta`, `jarvis-avisa`, `jarvis-mcp-stdio` | `jarvis-fala "text"` speaks on the Mac, one speech at a time. The other two are optional Claude Code hooks. `jarvis-mcp-stdio` starts the MCP server and reads the Grok Bot secrets from the Keychain. |
-| Dashboard | LaunchAgent `dev.jarvis.dashboard` on `http://127.0.0.1:7350` | Production build of `apps/dashboard`, kept running. |
-| Voice listening (Escuta) | `~/.local/share/jarvis/bin/Escuta.app`, LaunchAgent `dev.jarvis.escuta` | Menu bar app that listens for "Jarvis", transcribes on the device and hands the request to an agent session running in herdr. Needs macOS 26 and herdr; skipped when herdr is missing. |
-| MCP server in Claude Code | `claude mcp add ai-voice -s user` | Registered only if the `claude` CLI exists and `ai-voice` is not registered yet. |
-
-Everything optional is off by default:
-
-| Flag | Adds |
+| Caminho | O que é |
 | --- | --- |
-| `--com-echo` | The Amazon Echo: asks for your marketplace and default Echo, then tells you how to sign in. |
-| `--com-grok` | The Grok Bot callback server (`dev.jarvis.callback` on `127.0.0.1:7348`). Secrets go to the Keychain and public exposure goes through Tailscale Funnel, both by hand. |
-| `--sem-voz`, `--sem-dashboard`, `--sem-escuta`, `--sem-mcp` | Skip that piece. `--com-escuta` installs Escuta even without herdr. |
-| `--sim` | Asks nothing; uses the config file, the environment and the defaults. |
+| `apps/dashboard` | O super app do Jarvis, em SvelteKit e Effect: conversa, agenda, lembretes, ir (Mapas) e telemetria. Roda em `127.0.0.1:7350`. |
+| `apps/desktop` | O **Jarvis.app**: casca nativa em Swift com WKWebView em volta do dashboard. Abre de qualquer lugar com **⌃⌥J**. |
+| `apps/escuta` | A **Escuta**: app Swift de barra de menus que ouve sempre, transcreve no Mac e entrega a fala aos agentes do herdr. Se você fala enquanto o Jarvis fala, ele se cala e escuta. |
+| `apps/mcp` | O **MCP ai-voice**: as tools `speak`, `list_devices` e `grokbot_send`, as tools do Mac (Lembretes, Calendário, Mapas, ligação) e o servidor de callback do Grok Bot. |
+| `apps/maestro` | O **maestro**: o agente sempre ligado no herdr, com fila de eventos (`127.0.0.1:7353`), vigia que recria o agente se ele sumir e memória que sobrevive à compactação. |
+| `apps/coletor` | O coletor de telemetria: segue os eventos da escuta e o estado do herdr e dos LaunchAgents, exporta por OTLP e serve o retrato em `127.0.0.1:7352/estado`. |
+| `services/telemetria` | Grafana LGTM em Docker (OTel Collector, Prometheus, Tempo, Loki e Grafana num contêiner só, só em `127.0.0.1`). |
+| `services/tts` | A voz do Jarvis: [Kokoro-82M](https://huggingface.co/mlx-community/Kokoro-82M-bf16) via `mlx-audio`, em pt-BR, na porta 7349. |
+| `services/bin`, `services/launchd` | Os comandos de `~/.local/bin` (`jarvis-fala`, `jarvis-avisa`, `jarvis-mcp-stdio`...) e os modelos de LaunchAgent. |
+| `packages/alexa` | Sessão, Echos e fala da Alexa (Effect 4). |
+| `packages/apple` | Lembretes, Calendário, Mapas e Telefone pelo `osascript` e por um helper nativo. |
+| `packages/voice` | Fala no Mac: Kokoro primeiro, `say` como reserva, uma fala por vez com trava compartilhada. |
+| `packages/grokbot` | Envio para o Grok Bot, no máximo uma vez. |
+| `packages/telemetry` | Camada de OpenTelemetry comum e a sonda de saúde `jarvis-sonda`. |
+| `packages/announce` | Transforma eventos dos agentes em avisos curtos e seguros em pt-BR. |
 
-Your answers are kept in `~/.config/jarvis/jarvis.env` (no secrets there), which the dashboard and Escuta installers also read. At the end the script prints what is left to do by hand: macOS permissions (Calendars, Reminders, Automation, and Microphone and Speech Recognition for Escuta), the Amazon sign-in if you want the Echo, and the Keychain and Funnel steps if you want the Grok Bot. See [Mac setup](docs/setup.md) for every file it writes, the hooks and how to uninstall.
+## Requisitos
 
-The sections below set up the MCP server by hand, for other clients or other operating systems.
+- **macOS**, de preferência em Apple Silicon (a voz Kokoro só roda nele; sem ela, o Jarvis fala com o `say`). A Escuta precisa do **macOS 26**.
+- **[Bun](https://bun.sh) 1.3** ou mais novo. A versão exata está em `packageManager` no `package.json`.
+- **Xcode Command Line Tools** (`xcode-select --install`): compilam a Escuta, o Jarvis.app e o helper do Calendário.
+- **[uv](https://docs.astral.sh/uv/)** (`brew install uv`) ou Python 3.12, para o servidor de voz.
+- **Docker**, de preferência [OrbStack](https://orbstack.dev) (`brew install orbstack`), ou Docker Desktop, para a telemetria.
+- **herdr**, para a Escuta e o maestro entregarem pedidos aos agentes.
+- Opcional: uma conta Amazon com uma Echo, se quiser que o Jarvis fale na sala.
 
-## Layout
+## Setup
 
-This is a Bun workspace managed by Turborepo.
+### 1. Clonar e rodar o setup
 
-| Path | Package | What it is |
+```sh
+git clone https://github.com/<você>/<seu-fork>.git ~/jarvis
+cd ~/jarvis
+./scripts/setup.sh --dry-run   # mostra o que faria, sem mudar nada
+./scripts/setup.sh             # ou: bun run setup
+```
+
+O `scripts/setup.sh` é idempotente: rode de novo depois de cada `git pull`. Ele confere os pré-requisitos, roda `bun install` e instala:
+
+- a voz Kokoro em `~/.local/share/jarvis/tts` (LaunchAgent `dev.jarvis.tts`, porta 7349);
+- os comandos `jarvis-fala`, `jarvis-fala-resposta`, `jarvis-avisa` e `jarvis-mcp-stdio` em `~/.local/bin`;
+- o dashboard como LaunchAgent `dev.jarvis.dashboard` (porta 7350);
+- a Escuta em `~/.local/share/jarvis/bin/Escuta.app` (LaunchAgent `dev.jarvis.escuta`), só se o herdr existir;
+- o MCP `ai-voice` no Claude Code, se o `claude` existir e o MCP ainda não estiver registrado.
+
+| Flag | Efeito |
+| --- | --- |
+| `--com-echo` | Usa a Echo: pergunta o marketplace e a Echo padrão. |
+| `--com-grok` | Instala o callback do Grok Bot (`dev.jarvis.callback`, porta 7348). |
+| `--com-escuta` | Instala a Escuta mesmo sem o herdr no `PATH`. |
+| `--sem-voz`, `--sem-dashboard`, `--sem-escuta`, `--sem-mcp` | Pula essa parte. |
+| `--sim`, `-y` | Não pergunta nada; usa o arquivo de config, o ambiente e os padrões. |
+
+As respostas ficam em `~/.config/jarvis/jarvis.env`, sem segredos. No fim, o setup lista o que falta fazer à mão.
+
+### 2. Peças que o setup não instala
+
+Cada uma tem seu instalador, também idempotente:
+
+```sh
+apps/desktop/scripts/instalar.sh      # Jarvis.app em ~/Applications (--nao-abrir para não abrir)
+services/telemetria/install.sh        # LaunchAgent dev.jarvis.telemetria: sobe o Grafana LGTM e a sonda
+apps/coletor/scripts/instalar.sh      # LaunchAgent dev.jarvis.coletor (--desinstalar para remover)
+apps/maestro/install.sh --dry-run     # mostra os plists do maestro
+apps/maestro/install.sh               # LaunchAgents dev.jarvis.eventos e dev.jarvis.maestro
+apps/maestro/install.sh --hooks       # imprime os hooks para colar no ~/.claude/settings.json
+```
+
+O instalador do maestro não mexe no `settings.json`: os hooks você cola à mão. As rotinas do maestro partem de `apps/maestro/rotinas.example.json`.
+
+### 3. A Echo (opcional)
+
+```sh
+bun apps/mcp/src/main.ts login     # abre um proxy em http://127.0.0.1:3456/ para entrar na Amazon
+bun apps/mcp/src/main.ts devices   # lista as Echos, sem tocar som
+```
+
+A sessão fica em `~/.local/share/ai-voice/`, só com permissão do dono. Ela guarda tokens da sua conta: não compartilhe nem versione essa pasta. Detalhes em [Como a integração com a Alexa funciona](docs/alexa-integration.md).
+
+## Serviços e portas
+
+Tudo escuta só em `127.0.0.1`.
+
+| Porta | Serviço | LaunchAgent |
 | --- | --- | --- |
-| `packages/alexa` | `@jarvis/alexa` | Alexa session, devices, speech and login, built on Effect v4. |
-| `packages/apple` | `@jarvis/apple` | Reminders, Calendar, Maps and Phone on the Mac, through `osascript` and `open`. Effect v4. |
-| `packages/grokbot` | `@jarvis/grokbot` | In progress. Send-only and at-most-once: it sends a message and has no result channel. |
-| `packages/voice` | `@jarvis/voice` | Speech on the Mac: the local TTS server first, `say` as fallback, serialized with a lock shared with `jarvis-fala`. |
-| `packages/announce` | `@jarvis/announce` | Turns agent events into short, safe pt-BR announcements. |
-| `apps/mcp` | `@jarvis/mcp` | The MCP server (bin `jarvis-voice`: stdio and Streamable HTTP on `/mcp`) and the `login` and `devices` commands. Built on Effect v4. |
-| `apps/dashboard` | `@jarvis/dashboard` | SvelteKit dashboard: `/` (Alexa), `/lembretes`, `/agenda` and `/ir`. |
-| `apps/escuta` | Swift package | Always-on voice listening in the menu bar (macOS 26+). |
-| `services/tts` | Python | The Kokoro voice server, its lock file and installer, and the `fala-kokoro.sh` client. |
-| `services/bin`, `services/launchd` | Shell | The `~/.local/bin` commands and the LaunchAgent templates that `scripts/setup.sh` installs. |
+| 7347 | MCP por HTTP em modo dev (`bun run dev` em `apps/mcp`) | — |
+| 7348 | Callback do Grok Bot | `dev.jarvis.callback` |
+| 7349 | Voz Kokoro (TTS) | `dev.jarvis.tts` |
+| 7350 | Dashboard (super app) | `dev.jarvis.dashboard` |
+| 7351 | Grafana, painel Jarvis | `dev.jarvis.telemetria` |
+| 7352 | Coletor de telemetria | `dev.jarvis.coletor` |
+| 7353 | Fila de eventos do maestro | `dev.jarvis.eventos` |
+| 4318 | OTLP HTTP (gRPC em 4317) | contêiner `jarvis-telemetria` |
+| 9090 | Prometheus | contêiner `jarvis-telemetria` |
 
-Environment variables keep the `AI_VOICE_*` names from the original project.
+A Escuta (`dev.jarvis.escuta`) e o vigia do maestro (`dev.jarvis.maestro`, a cada 60 s) não abrem porta.
 
-## Requirements
+Para reiniciar qualquer um: `launchctl kickstart -k gui/$(id -u)/<label>`.
 
-- [Bun](https://bun.sh) 1.3 or newer. The exact version is pinned in `packageManager` in `package.json`.
-- macOS. The Mac tools and the dashboard's Reminders, Agenda and Ir pages need it, and macOS asks for Automation permission the first time.
-- For `scripts/setup.sh`: Xcode Command Line Tools (`xcode-select --install`), and [uv](https://docs.astral.sh/uv/) or Python 3.12 for the voice server on Apple Silicon. Escuta needs macOS 26 and herdr.
-- For the Echo only: an Amazon account with at least one Echo device.
-- The machine running Jarvis must be on and online while agents use it.
+## Rodando cada app
 
-## Quick start
+Comandos a partir da raiz do repositório.
 
-Clone the repository and install the dependencies once:
+**Dashboard**
+
+```sh
+bunx turbo run dev --filter=@jarvis/dashboard   # modo dev
+cd apps/dashboard && bun run app:install        # build de produção como LaunchAgent (porta 7350)
+```
+
+Telas: `/conversa`, `/agenda`, `/lembretes`, `/ir`, `/telemetria` e `/` (Alexa). Ele lê as variáveis `AI_VOICE_*` (veja `apps/dashboard/.env.example`) e não tem autenticação própria: deixe-o numa máquina e numa rede em que você confia.
+
+**Jarvis.app**
+
+```sh
+apps/desktop/scripts/instalar.sh
+```
+
+Abre o dashboard numa janela nativa. **⌃⌥J** traz o Jarvis para a frente de qualquer app. Por padrão aponta para `http://127.0.0.1:7350/`; `JARVIS_DASHBOARD_URL` muda isso.
+
+**Escuta**
+
+```sh
+cd apps/escuta
+scripts/instalar.sh --carregar                            # compila, monta o Escuta.app e carrega o LaunchAgent
+launchctl kickstart -k gui/$(id -u)/dev.jarvis.escuta    # reiniciar
+launchctl bootout gui/$(id -u)/dev.jarvis.escuta         # desligar até o próximo login
+swift test
+```
+
+Ajustes, logs e testes sem microfone estão em [`apps/escuta/README.md`](apps/escuta/README.md).
+
+**MCP ai-voice**
+
+```sh
+bun apps/mcp/src/main.ts                 # stdio, como os clientes MCP usam (ou: bun run voice)
+cd apps/mcp && bun run dev               # HTTP em 127.0.0.1:7347/mcp, com recarga
+cd apps/mcp && bun run callback          # servidor de callback do Grok Bot
+```
+
+Para registrar no Claude Code à mão (o setup já faz isso):
+
+```sh
+claude mcp add ai-voice --scope user --env AI_VOICE_ENABLE_SPEECH=1 -- ~/.local/bin/jarvis-mcp-stdio
+```
+
+A fala só sai com `AI_VOICE_ENABLE_SPEECH=1`. Na Echo, defina `AI_VOICE_DEFAULT_DEVICE=<serial-da-sua-echo>`. As tools do Mac só existem no stdio, porque o HTTP não tem autenticação. Codex, Cursor e outros clientes: veja a [referência de configuração](docs/configuration.md) e [Jarvis pela rede](docs/network.md).
+
+**Maestro**
+
+```sh
+cd apps/maestro
+bun run eventos   # fila de eventos em 127.0.0.1:7353
+bun run vigia     # uma passada do vigia: recria o agente no herdr se ele sumiu
+```
+
+Em uso normal, os dois rodam pelos LaunchAgents do `apps/maestro/install.sh`. A memória fica em `~/.local/share/jarvis/maestro`.
+
+**Coletor**
+
+```sh
+cd apps/coletor
+bun run dev       # com recarga
+bun run start
+```
+
+**Telemetria**
+
+```sh
+docker compose -f services/telemetria/compose.yaml up -d
+```
+
+Com o LaunchAgent `dev.jarvis.telemetria`, a sonda sobe o contêiner sozinha quando o coletor não responde.
+
+**Voz**
+
+```sh
+jarvis-fala "Olá, eu sou o Jarvis."
+```
+
+## Telemetria
+
+O coletor lê os eventos da Escuta e, a cada 5 s, o herdr (agentes, estados, RAM e CPU) e os LaunchAgents `dev.jarvis.*`. O MCP, o callback e o dashboard exportam seus próprios traces. Tudo vai por OTLP para o Grafana LGTM, com retenção de 3 dias.
+
+| Link | O que mostra |
+| --- | --- |
+| http://127.0.0.1:7350/telemetria | A aba Telemetria do super app: serviços, agentes do herdr, latência e interrupções, ao vivo. |
+| http://127.0.0.1:7351/d/jarvis | O painel Jarvis no Grafana. |
+| http://127.0.0.1:9090 | Prometheus. |
+| http://127.0.0.1:7352/estado | O último retrato do coletor, em JSON (SSE em `/estado/ao-vivo`). |
+
+## Permissões do macOS e assinatura local
+
+Na primeira vez, o macOS pede permissão. Aceite, ou ligue depois em **Ajustes do Sistema > Privacidade e Segurança**:
+
+| Permissão | Para quem |
+| --- | --- |
+| Microfone | Escuta |
+| Reconhecimento de Fala | Escuta |
+| Calendários | Helper do Calendário (agenda do dashboard e tools `calendar_*`) |
+| Lembretes | Dashboard e tools `reminders_*` |
+| Automação | `osascript` controlando Lembretes, Calendário e Mapas |
+
+O macOS amarra essas permissões à assinatura do app. Com assinatura ad hoc, cada nova compilação parece um app novo e as permissões são pedidas de novo. Para evitar isso, crie uma vez um certificado de assinatura de código autoassinado chamado **Jarvis Local Signing** no Acesso às Chaves (Assistente de Certificado > Criar um Certificado, tipo Assinatura de Código), na keychain de login. Confira com:
+
+```sh
+security find-identity -p codesigning
+```
+
+Os instaladores da Escuta e do Jarvis.app usam essa identidade automaticamente; `JARVIS_SIGNING_IDENTITY` escolhe outra. Sem nenhuma, eles assinam ad hoc.
+
+## Desenvolvimento
 
 ```sh
 bun install
-```
-
-### 1. Sign in to Amazon
-
-```sh
-bun apps/mcp/src/main.ts login
-```
-
-When the terminal says the proxy is ready, open **http://127.0.0.1:3456/** in a browser on the same machine and sign in to Amazon, including MFA or CAPTCHA if asked. You type your password in the browser, never into an agent or chat. The proxy only listens on loopback and shuts down when login completes, after ten minutes, or on Ctrl+C. Logging in may register a virtual device on your Amazon account.
-
-If your account is not on `amazon.com`, pass your marketplace for the login:
-
-```sh
-AI_VOICE_AMAZON_PAGE=amazon.co.uk bun apps/mcp/src/main.ts login
-```
-
-The session is stored in `~/.local/share/ai-voice/` with owner-only permissions. It holds tokens for your Amazon account: do not share or commit that folder.
-
-### 2. Pick your Echo
-
-```sh
-bun apps/mcp/src/main.ts devices
-```
-
-This lists your Echo devices without playing audio. Copy the `serial` of the one that should speak by default.
-
-### 3. Connect your agent
-
-Speech stays disabled until you set `AI_VOICE_ENABLE_SPEECH=1`, so nothing can make noise in your home before you opt in. In the examples below, replace `SERIAL` with the serial from step 2 and `/ABS/PATH` with the absolute path of this repository. Set `AI_VOICE_LOCALE` if your Echo does not speak `en-US`, for example `pt-BR` or `de-DE`.
-
-If your client does not inherit your shell `PATH` (common with nvm or fnm), replace `bun` with its absolute path, from `which bun`.
-
-#### Claude Code
-
-```sh
-claude mcp add ai-voice --scope user \
-  --env AI_VOICE_ENABLE_SPEECH=1 --env AI_VOICE_DEFAULT_DEVICE=SERIAL \
-  -- bun /ABS/PATH/apps/mcp/src/main.ts
-```
-
-#### Codex
-
-```sh
-codex mcp add ai-voice \
-  --env AI_VOICE_ENABLE_SPEECH=1 --env AI_VOICE_DEFAULT_DEVICE=SERIAL \
-  -- bun /ABS/PATH/apps/mcp/src/main.ts
-```
-
-Or add it to `~/.codex/config.toml`:
-
-```toml
-[mcp_servers.ai-voice]
-command = "bun"
-args = ["/ABS/PATH/apps/mcp/src/main.ts"]
-env = { AI_VOICE_ENABLE_SPEECH = "1", AI_VOICE_DEFAULT_DEVICE = "SERIAL" }
-```
-
-#### Any other MCP client
-
-Jarvis is a standard stdio MCP server. Most clients (Claude Desktop, Cursor, VS Code, Gemini CLI and others) accept this JSON shape in their MCP configuration file:
-
-```json
-{
-  "mcpServers": {
-    "ai-voice": {
-      "command": "bun",
-      "args": ["/ABS/PATH/apps/mcp/src/main.ts"],
-      "env": { "AI_VOICE_ENABLE_SPEECH": "1", "AI_VOICE_DEFAULT_DEVICE": "SERIAL" }
-    }
-  }
-}
-```
-
-Clients that speak Streamable HTTP can also connect to a Jarvis instance running on another machine. See [Serve Jarvis over the network](docs/network.md).
-
-### 4. Try it
-
-Restart or reconnect your client, then ask:
-
-> Say "hello from my agent" out loud.
-
-To make an agent speak without being asked each time, add a rule to its instruction file (`CLAUDE.md`, `AGENTS.md` or equivalent), for example: *"When you finish a task that took more than a few minutes, call `speak` with a one-sentence summary."*
-
-### Dashboard
-
-```sh
-bunx turbo run dev --filter=@jarvis/dashboard
-```
-
-Pages: `/` sends speech to an Echo, `/lembretes` lists and creates reminders, `/agenda` shows today or the week, and `/ir` opens Maps searches and routes or starts a call after an explicit confirmation. The dashboard reads the same `AI_VOICE_*` variables and has no authentication of its own, so keep it on a machine and network you trust. See [the dashboard section](docs/configuration.md#dashboard).
-
-## What to expect
-
-- `speak` returns `status: "accepted"` with `playback_confirmed: false`. The Alexa API accepted the request; only you can confirm you heard it.
-- Jarvis never retries speech. After a timeout or error the Echo may already have received the request, and retrying would repeat it.
-- Text longer than 250 characters is split at sentence or word boundaries and sent as one ordered sequence.
-- One server speaks one request at a time, on one physical Echo. Device groups, volume control and SSML are out of scope.
-- The session renews itself. If renewal fails, the tool asks you to run `bun apps/mcp/src/main.ts login` again.
-
-## Documentation
-
-- [Configuration reference](docs/configuration.md): every environment variable, the tool contracts, and troubleshooting.
-- [Serve Jarvis over the network](docs/network.md): run it once on a home server and use it from every machine.
-- [How the Alexa integration works](docs/alexa-integration.md): the private APIs involved, what was validated, security and known limits.
-- [Mac setup](docs/setup.md): what `scripts/setup.sh` installs, the files it writes, the optional parts and how to uninstall.
-
-## Development
-
-```sh
-bun install
-bun run check   # type checks across the workspace
+bun run check   # tipos em todo o workspace
 bun run test
 bun run build
 ```
 
-These run through Turborepo, so each package is checked, tested or built in dependency order and results are cached. Run the dashboard with the `dev` command shown in [Dashboard](#dashboard).
+Rodam pelo Turborepo, em ordem de dependência e com cache. Os testes usam Echos e transporte simulados: não precisam de conta Amazon e não tocam som.
 
-Tests use simulated Amazon devices and transport, need no Amazon account and play no audio.
+## Documentação
 
-Issues and pull requests are welcome. Reports from marketplaces, locales and Echo models other than the ones listed in [what was validated](docs/alexa-integration.md#what-was-validated) are especially useful.
+- [Setup no Mac](docs/setup.md): o que o `scripts/setup.sh` instala, os arquivos que grava e como desinstalar.
+- [Referência de configuração](docs/configuration.md): variáveis de ambiente, contratos das tools e solução de problemas.
+- [Jarvis pela rede](docs/network.md): um servidor em casa para todas as máquinas.
+- [Como a integração com a Alexa funciona](docs/alexa-integration.md): as APIs privadas, o que foi validado e os limites.
 
-## License
+> [!IMPORTANT]
+> O Jarvis é um projeto pessoal e não oficial. A parte da Echo usa as APIs privadas do app da Alexa, via [`alexa-remote2`](https://github.com/Apollon77/alexa-remote), e não tem relação com a Amazon nem aval dela. A Amazon pode mudar essas APIs a qualquer momento.
 
-[MIT](LICENSE). Copyright (c) 2026 Henrique Arthur, the original author of AI Voice, and Fernando Antonio for the changes in this fork. Amazon, Alexa and Echo are trademarks of Amazon.com, Inc. or its affiliates.
+## Licença
+
+[MIT](LICENSE). Copyright (c) 2026 Henrique Arthur, autor original do AI Voice, e Fernando Antonio pelas mudanças deste fork. Amazon, Alexa e Echo são marcas da Amazon.com, Inc. ou de suas afiliadas.
