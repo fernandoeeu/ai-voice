@@ -31,12 +31,31 @@ json_str() {
 }
 BODY="{\"text\":$(json_str "$TEXT"),\"voice\":$(json_str "$VOICE")}"
 
+# Uma linha por fala em FALA_LOG: quanto áudio havia e como o tocador terminou. Código 143 é
+# SIGTERM (o barge-in da escuta, ou outro processo que segura o mesmo lock); 0 é fala inteira.
+FALA_LOG="${JARVIS_FALA_LOG:-$HOME/.local/share/jarvis/tts/logs/fala.log}"
+T0=$(date +%s)
+registra() {
+  mkdir -p "$(dirname "$FALA_LOG")" 2>/dev/null
+  printf '%s pid=%s motor=%s chars=%s audio_s=%s rc=%s dur_s=%s\n' \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" "$1" "${#TEXT}" "$2" "$3" "$(( $(date +%s) - T0 ))" \
+    >>"$FALA_LOG" 2>/dev/null
+}
+trap 'registra "${MOTOR:-?}" "${AUDIO_S:-?}" 143; exit 143' TERM
+
 if /usr/bin/curl -sf --max-time 10 \
      -H 'Content-Type: application/json' \
      --data-binary "$BODY" \
      -o "$TMP" "${TTS_URL%/}/synthesize" \
    && [ -s "$TMP" ]; then
+  MOTOR=kokoro
+  # WAV mono 16 bits a 24 kHz com cabeçalho de 44 bytes.
+  AUDIO_S=$(( ($(stat -f %z "$TMP") - 44) / 48000 ))
   /usr/bin/afplay "$TMP"
 else
+  MOTOR=say AUDIO_S=?
   /usr/bin/say -v "$MAC_VOICE" -- "$TEXT"
 fi
+RC=$?
+registra "$MOTOR" "$AUDIO_S" "$RC"
+exit "$RC"
