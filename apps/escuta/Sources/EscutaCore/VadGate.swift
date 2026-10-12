@@ -13,7 +13,7 @@ public struct VadGate: Sendable, Equatable {
         /// Blocos com voz exigidos para a fala valer; menos que isso é estalo, tosse, porta.
         public var minVoicedChunks: Int
 
-        public init(threshold: Float = 0.6, negativeThreshold: Float = 0.35, minSilenceChunks: Int = 2,
+        public init(threshold: Float = 0.5, negativeThreshold: Float = 0.25, minSilenceChunks: Int = 3,
                     minVoicedChunks: Int = 1) {
             self.threshold = threshold
             self.negativeThreshold = negativeThreshold
