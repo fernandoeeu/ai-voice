@@ -7,7 +7,7 @@
 import { existsSync } from 'node:fs';
 import http from 'node:http';
 import process from 'node:process';
-import { hostLocal } from './hosts-locais.mjs';
+import { hostLocal, protocoloDaRequisicao } from './hosts-locais.mjs';
 
 process.env.PROTOCOL_HEADER ??= 'x-jarvis-proto';
 // Publicado: handler.js fica ao lado; em desenvolvimento (`bun run start`) vem de ../build.
@@ -24,7 +24,7 @@ const server = http.createServer((req, res) => {
 		res.end('Host não permitido');
 		return;
 	}
-	req.headers[process.env.PROTOCOL_HEADER] = 'http';
+	req.headers[process.env.PROTOCOL_HEADER] = protocoloDaRequisicao(String(req.headers.host ?? ''), req.headers['x-forwarded-proto']);
 	handler(req, res, () => {
 		res.statusCode = 404;
 		res.end();
