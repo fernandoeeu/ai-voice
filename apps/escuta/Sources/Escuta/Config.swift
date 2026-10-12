@@ -16,8 +16,8 @@ struct Config {
     var orchestratorName = "maestro"
     var herdr = NSHomeDirectory() + "/.local/bin/herdr"
     var speechLock = NSHomeDirectory() + "/.local/share/jarvis/fala.lock"
-    /// Depois que o Jarvis para de falar, ainda ignora isto (eco da sala).
-    var speechTail: Double = 0.6
+    /// Depois que o Jarvis para de falar, o eco ainda pode chegar por isto: a fala conta como misturada.
+    var speechTail: Double = 1.0
     /// Troca preventiva da tarefa de reconhecimento quando ninguém está falando.
     var rotateEvery: Double = 600
     /// Em vez de mandar ao herdr, acrescenta cada pedido (JSON por linha) a este arquivo.

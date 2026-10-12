@@ -14,7 +14,11 @@ no herdr (`wT2:p2`; se o id mudar, o agente chamado `maestro`). Toca um Tink ao 
 - Só envia texto final; nunca manda fragmento nem "(continuação)".
 - Depois de entregar um pedido, a fala que começar nos 8 s seguintes também é entregue, sem precisar de
   "Jarvis", como mensagem nova e inteira (uma pausa longa no meio do pedido não perde palavras).
-- Enquanto `~/.local/share/jarvis/fala.lock` está ocupado (o Jarvis falando), o reconhecedor recebe silêncio.
+- Enquanto `~/.local/share/jarvis/fala.lock` está ocupado (o Jarvis falando), a escuta continua ouvindo.
+  Dizer "Jarvis" (ou começar com "para", "espera", "chega") cala o Jarvis na hora: encerra quem segura o
+  lock (lockf, o script do Kokoro, afplay ou say) e segue captando o pedido. Durante a fala só vale o que
+  vem depois de "Jarvis" (sem janela de conversa), e trechos iguais ao texto falado são descartados como eco.
+  O texto falado vem de `~/.local/share/jarvis/fala.txt`, gravado pelo servidor de voz a cada síntese.
 
 ## Instalar e operar
 

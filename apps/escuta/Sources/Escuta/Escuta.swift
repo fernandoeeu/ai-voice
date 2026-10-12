@@ -57,12 +57,7 @@ enum Phase: Equatable {
 /// Estado do áudio compartilhado com a thread de captura.
 final class AudioGate: @unchecked Sendable {
     private let lock = NSLock()
-    private var _muted = false
     private var _paused = false
-    var muted: Bool {
-        get { lock.lock(); defer { lock.unlock() }; return _muted }
-        set { lock.lock(); _muted = newValue; lock.unlock() }
-    }
     var paused: Bool {
         get { lock.lock(); defer { lock.unlock() }; return _paused }
         set { lock.lock(); _paused = newValue; lock.unlock() }
@@ -116,6 +111,10 @@ final class Escuta: ObservableObject {
     private var lastTextChangeAt = Date.distantPast
     private var lastVoiceAt = Date.distantPast
     private var lastEventAt = Date()
+    private var spokenText: String?
+    private var bargedIn = false
+    private var speechEndedAt = Date.distantPast
+    private var overlapped = false
     private var finalizeAt: Date?
     private var finalizeDone = false
     private let lockQueue = DispatchQueue(label: "escuta.fala-lock")
@@ -214,8 +213,7 @@ final class Escuta: ObservableObject {
         if gate.paused { return }
         if converter?.inputFormat != buffer.format { converter = AVAudioConverter(from: buffer.format, to: fmt) }
         guard let converter else { return }
-        let muted = gate.muted
-        meter(buffer, muted: muted)
+        meter(buffer)
         let cap = AVAudioFrameCount(Double(buffer.frameLength) * fmt.sampleRate / buffer.format.sampleRate) + 64
         guard let out = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: cap) else { return }
         var fed = false
@@ -223,12 +221,6 @@ final class Escuta: ObservableObject {
         converter.convert(to: out, error: &e) { _, status in
             if fed { status.pointee = .noDataNow; return nil }
             fed = true; status.pointee = .haveData; return buffer
-        }
-        if muted {
-            // O Jarvis está falando: o reconhecedor recebe silêncio, não a voz dele. A linha do tempo segue contínua.
-            for b in UnsafeMutableAudioBufferListPointer(out.mutableAudioBufferList) where b.mData != nil {
-                memset(b.mData, 0, Int(b.mDataByteSize))
-            }
         }
         let ok = e == nil
         let n = Int(out.frameLength)
@@ -334,7 +326,7 @@ final class Escuta: ObservableObject {
 
     // MARK: Áudio
 
-    private func meter(_ buffer: AVAudioPCMBuffer, muted: Bool) {
+    private func meter(_ buffer: AVAudioPCMBuffer) {
         guard let ch = buffer.floatChannelData?[0] else { return }
         let n = Int(buffer.frameLength)
         var sum: Float = 0
@@ -346,9 +338,9 @@ final class Escuta: ObservableObject {
             self.peakDB = max(self.peakDB, db)
             // Piso de ruído: desce rápido, sobe devagar. Voz = bem acima do piso.
             self.noiseFloor = db < self.noiseFloor ? db : min(db, self.noiseFloor + 0.05)
-            if !muted, db > -55, db > self.noiseFloor + 12 { self.lastVoiceAt = Date() }
+            if db > -55, db > self.noiseFloor + 12 { self.lastVoiceAt = Date() }
             self.levels.removeFirst()
-            self.levels.append(muted ? 0 : level)
+            self.levels.append(level)
         }
     }
 
@@ -388,26 +380,52 @@ final class Escuta: ObservableObject {
 
     // MARK: Jarvis falando
 
-    /// Confere o fala.lock a cada 50 ms. Ocupado (e um pouco depois) = o reconhecedor recebe silêncio.
+    /// Confere o fala.lock a cada 50 ms. O reconhecedor continua ouvindo enquanto o Jarvis fala,
+    /// para o dono poder interromper; o texto falado serve para reconhecer o eco.
     private func pollSpeechLock() {
         let path = config.speechLock
-        let tail = config.speechTail
         lockQueue.async { [weak self] in
             var wasHeld = false
-            var releasedAt = Date.distantPast
             while let self {
                 let held = SpeechLock.isHeld(path)
                 if held != wasHeld {
                     wasHeld = held
-                    if !held { releasedAt = Date() }
+                    let spoken = held ? Speaker.currentText(lock: path) : nil
                     DispatchQueue.main.async {
                         self.jarvisSpeaking = held
-                        emit(["type": held ? "jarvis_speaking" : "jarvis_quiet"])
+                        if held {
+                            self.spokenText = spoken
+                            self.bargedIn = false
+                        } else {
+                            self.speechEndedAt = Date()
+                        }
+                        emit(["type": held ? "jarvis_speaking" : "jarvis_quiet", "text": spoken ?? ""])
                     }
                 }
-                let mute = held || Date().timeIntervalSince(releasedAt) < tail
-                if mute != self.gate.muted { self.gate.muted = mute }
                 Thread.sleep(forTimeInterval: 0.05)
+            }
+        }
+    }
+
+    /// O Jarvis está falando, ou acabou há pouco (o eco da sala ainda chega ao reconhecedor).
+    private var inSpeech: Bool { jarvisSpeaking || Date().timeIntervalSince(speechEndedAt) < config.speechTail }
+
+    /// O dono disse "Jarvis" (ou "para", "espera", "chega") por cima da fala: cala o Jarvis na hora.
+    @MainActor
+    private func checkBargeIn(_ text: String) {
+        guard jarvisSpeaking, !bargedIn, !text.isEmpty else { return }
+        // O trecho em revisão pode trazer o eco antes do "Jarvis": julga a partir da palavra de ativação.
+        let candidate = Wake.lastCommand(in: text).map { String(text[$0.wake.lowerBound...]) } ?? text
+        if BargeIn.isEcho(Wake.lastCommand(in: candidate)?.rest ?? candidate, spoken: spokenText) { return }
+        guard let word = BargeIn.trigger(candidate, spoken: spokenText) else { return }
+        bargedIn = true
+        let path = config.speechLock
+        // Fila própria: a lockQueue está ocupada para sempre com o laço que vigia o fala.lock.
+        DispatchQueue.global(qos: .userInteractive).async {
+            let killed = Speaker.stop(lock: path)
+            DispatchQueue.main.async {
+                logLine("interrompeu o Jarvis (\"\(word)\"); processos encerrados: \(killed)")
+                emit(["type": "barge_in", "word": word, "heard": text, "killed": killed])
             }
         }
     }
@@ -415,7 +433,15 @@ final class Escuta: ObservableObject {
     // MARK: Transcrição e fim de fala
 
     /// Decide se a frase vira pedido. arm = "Jarvis" sozinho.
-    private func decide(_ text: String, startedAt: Date) -> (wake: Range<String.Index>?, command: String?, arm: Bool) {
+    private func decide(_ text: String, startedAt: Date, overlapped: Bool) -> (wake: Range<String.Index>?, command: String?, arm: Bool) {
+        if overlapped {
+            // Fala misturada com a voz do Jarvis: só vale o que vem depois de "Jarvis"; sem janela de conversa.
+            guard let c = Wake.lastCommand(in: text) else { return (nil, nil, false) }
+            if BargeIn.isEcho(c.rest, spoken: spokenText) { return (nil, nil, false) }
+            // "Jarvis, para" só cala o Jarvis; não vira pedido.
+            if BargeIn.isOnlyStop(c.rest) { return (c.wake, nil, false) }
+            return (c.wake, c.rest.isEmpty ? nil : c.rest, c.rest.isEmpty)
+        }
         if let c = Wake.command(in: text) {
             return (c.wake, c.rest.isEmpty ? nil : c.rest, c.rest.isEmpty)
         }
@@ -449,12 +475,15 @@ final class Escuta: ObservableObject {
         }
         let w = whole
         partial = w
+        if ProcessInfo.processInfo.environment["ESCUTA_DEBUG"] != nil { logLine("evento final=\(e.isFinal) falando=\(jarvisSpeaking) texto=\(text)") }
+        checkBargeIn(text)
         guard w != lastWhole else { return }
         lastWhole = w
         guard !w.isEmpty else { return }
         lastTextChangeAt = Date()
         lastPartialAt = Date()
-        let isCommand = Wake.leading(w) != nil || armedUntil != nil
+        if inSpeech { overlapped = true }
+        let isCommand = overlapped ? Wake.lastCommand(in: w) != nil : (Wake.leading(w) != nil || armedUntil != nil)
         if capturing != isCommand { capturing = isCommand }
         if utteranceStart == nil { utteranceStart = Date() }
         if phase == .listening { setPhase(.hearing, resetAfter: 1.5) }
@@ -519,8 +548,10 @@ final class Escuta: ObservableObject {
         segments = []; livePartial = ""; lastWhole = ""; utteranceStart = nil; partial = ""
         finalizeAt = nil
         capturing = false
+        let wasOverlapped = overlapped
+        overlapped = false
         guard !text.isEmpty else { return }
-        let d = decide(text, startedAt: began)
+        let d = decide(text, startedAt: began, overlapped: wasOverlapped)
         if d.wake != nil { lastWakeAt = Date() }
         if d.arm {
             armedUntil = Date().addingTimeInterval(config.armedWindow)
@@ -529,7 +560,7 @@ final class Escuta: ObservableObject {
         }
         heard.insert(Heard(at: Date(), text: text, wakeRange: d.wake, command: d.command), at: 0)
         if heard.count > 12 { heard.removeLast() }
-        emit(["type": "heard", "text": text, "wake": d.wake != nil, "end": reason, "seconds": (duration * 10).rounded() / 10])
+        emit(["type": "heard", "text": text, "wake": d.wake != nil, "end": reason, "during_speech": wasOverlapped, "seconds": (duration * 10).rounded() / 10])
         if let c = d.command, !c.isEmpty { send(c) }
     }
 
