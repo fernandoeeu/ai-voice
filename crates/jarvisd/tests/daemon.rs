@@ -442,6 +442,57 @@ fn socket_velho_e_removido_e_vivo_e_respeitado() {
     let _ = filho.wait();
 }
 
+fn jarvisd_em(dir: &Path, sock: &Path) -> Command {
+    let mut c = Command::new(env!("CARGO_BIN_EXE_jarvisd"));
+    c.env("JARVISD_SAIDA", "fake")
+        .env("JARVISD_SOCK", sock)
+        .env("JARVISD_LOCK", dir.join("fala.lock"))
+        .env("JARVISD_LOG_DIR", dir.join("logs"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    c
+}
+
+#[test]
+fn arquivo_comum_no_caminho_do_socket_nao_e_apagado() {
+    let dir = TempDir::new().unwrap();
+    let alvo = dir.path().join("d.sock");
+    std::fs::write(&alvo, "importante").unwrap();
+    let st = jarvisd_em(dir.path(), &alvo).status().unwrap();
+    assert!(!st.success());
+    assert_eq!(std::fs::read_to_string(&alvo).unwrap(), "importante");
+}
+
+#[test]
+fn pasta_preexistente_mantem_o_modo() {
+    let dir = TempDir::new().unwrap();
+    let pasta = dir.path().join("aberta");
+    std::fs::create_dir(&pasta).unwrap();
+    std::fs::set_permissions(&pasta, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let sock = pasta.join("d.sock");
+    let mut filho = jarvisd_em(dir.path(), &sock).spawn().unwrap();
+    let t = Instant::now();
+    while UnixStream::connect(&sock).is_err() {
+        assert!(t.elapsed() < Duration::from_secs(10), "daemon nao subiu");
+        thread::sleep(Duration::from_millis(20));
+    }
+    let modo = std::fs::metadata(&pasta).unwrap().permissions().mode() & 0o777;
+    let _ = filho.kill();
+    let _ = filho.wait();
+    assert_eq!(modo, 0o755);
+}
+
+#[test]
+fn segundo_daemon_simultaneo_sai_com_erro_e_nao_mexe_no_socket() {
+    let d = Daemon::subir(0.2);
+    let dir2 = TempDir::new().unwrap();
+    let st = jarvisd_em(dir2.path(), &d.sock()).status().unwrap();
+    assert!(!st.success());
+    let mut c = d.cliente();
+    c.enviar(&json!({"v":1,"id":"p","op":"ping"}));
+    assert_eq!(c.ler()["ev"], "pong");
+}
+
 #[test]
 fn sigterm_limpa_o_socket() {
     let mut d = Daemon::subir(0.2);

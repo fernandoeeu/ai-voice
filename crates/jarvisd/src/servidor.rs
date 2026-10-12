@@ -26,14 +26,48 @@ pub struct Ctx {
 
 type Tx = mpsc::UnboundedSender<String>;
 
-/// Cria a pasta (0700), remove socket velho se ninguem atende e faz o bind (0600).
+/// Lock de instancia unica; fica aberto (O_CLOEXEC) enquanto o processo vive.
+/// Nunca e o fala.lock.
+static LOCK_INSTANCIA: std::sync::OnceLock<std::fs::File> = std::sync::OnceLock::new();
+
+fn travar_instancia(caminho: &Path) -> anyhow::Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    let mut nome = caminho.as_os_str().to_owned();
+    nome.push(".pid");
+    let pid = std::path::PathBuf::from(nome);
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .mode(0o600)
+        .custom_flags(rustix::fs::OFlags::CLOEXEC.bits() as i32)
+        .open(&pid)?;
+    if rustix::fs::flock(&f, rustix::fs::FlockOperation::NonBlockingLockExclusive).is_err() {
+        anyhow::bail!(
+            "ja ha um jarvisd rodando (lock de instancia ocupado em {})",
+            pid.display()
+        );
+    }
+    f.set_len(0)?;
+    writeln!(f, "{}", std::process::id())?;
+    let _ = LOCK_INSTANCIA.set(f);
+    Ok(())
+}
+
+/// Cria a pasta (0700, so se for nova), trava a instancia, remove socket velho
+/// (so se for socket e ninguem atender) e faz o bind (0600).
 pub fn ligar(caminho: &Path) -> anyhow::Result<UnixListener> {
-    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{DirBuilderExt, FileTypeExt, MetadataExt, PermissionsExt};
     if let Some(pai) = caminho.parent().filter(|p| !p.as_os_str().is_empty()) {
         if pai.exists() {
-            let meu = rustix::process::getuid().as_raw();
-            if std::fs::metadata(pai)?.uid() == meu {
-                std::fs::set_permissions(pai, std::fs::Permissions::from_mode(0o700))?;
+            let m = std::fs::metadata(pai)?;
+            if m.uid() == rustix::process::getuid().as_raw() && m.mode() & 0o077 != 0 {
+                tracing::warn!(
+                    pasta = %pai.display(),
+                    modo = format!("{:o}", m.mode() & 0o777),
+                    "pasta do socket pre-existente com permissao mais aberta que 0700; mantida"
+                );
             }
         } else {
             std::fs::DirBuilder::new()
@@ -42,7 +76,14 @@ pub fn ligar(caminho: &Path) -> anyhow::Result<UnixListener> {
                 .create(pai)?;
         }
     }
-    if caminho.exists() {
+    travar_instancia(caminho)?;
+    if let Ok(m) = std::fs::symlink_metadata(caminho) {
+        if !m.file_type().is_socket() {
+            anyhow::bail!(
+                "{} existe e nao e um socket; recusando apagar",
+                caminho.display()
+            );
+        }
         if std::os::unix::net::UnixStream::connect(caminho).is_ok() {
             anyhow::bail!("ja ha um jarvisd atendendo em {}", caminho.display());
         }
