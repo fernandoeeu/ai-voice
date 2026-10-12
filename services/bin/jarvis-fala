@@ -1,0 +1,8 @@
+#!/bin/zsh
+# jarvis-fala: fala o texto no Mac (sai nos AirPods), em pt-BR, uma fala por vez.
+# Voz local Kokoro (fallback: say -v Luciana), mesmo lock do speak do servidor MCP.
+# Instalado pelo scripts/setup.sh do repositório Jarvis.
+# Uso: jarvis-fala "texto"   ou   echo "texto" | jarvis-fala
+text="${*:-$(cat)}"
+[[ -z "${text// }" ]] && exit 0
+exec "${JARVIS_TTS_HOME:-$HOME/.local/share/jarvis/tts}/fala-kokoro.sh" "$text"
