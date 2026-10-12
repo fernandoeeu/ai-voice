@@ -17,9 +17,17 @@ final class Recognizer {
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
     private var backlog: [AVAudioPCMBuffer] = []
     private var backlogFrames = 0
+    /// Pré-roll: os últimos ~600 ms já entregues à tarefa atual. Quando outra tarefa abre (troca ou queda),
+    /// eles vão primeiro para ela; sem isso, a palavra que a tarefa velha ouvia pela metade sumia,
+    /// e o começo da frase seguinte chegava cortado.
+    static let prerollSeconds = 0.6
+    private var preroll: [AVAudioPCMBuffer] = []
+    private var prerollFrames = 0
     private var analyzer: SpeechAnalyzer?
     private(set) var generation = 0
     private(set) var startedAt = Date()
+    /// Quando a última tarefa nova abriu (com pré-roll): o começo dela pode repetir a última palavra da anterior.
+    private(set) var lastStartAt = Date.distantPast
     private var restarting = false
     private var pendingRestart = false
     private var failures = 0
@@ -60,6 +68,13 @@ final class Recognizer {
         defer { lock.unlock() }
         if let c = continuation {
             c.yield(AnalyzerInput(buffer: buffer))
+            preroll.append(buffer)
+            prerollFrames += Int(buffer.frameLength)
+            let keep = Int((format?.sampleRate ?? 16000) * Self.prerollSeconds)
+            while let first = preroll.first, prerollFrames - Int(first.frameLength) >= keep {
+                prerollFrames -= Int(first.frameLength)
+                preroll.removeFirst()
+            }
             return
         }
         backlog.append(buffer)
@@ -110,20 +125,26 @@ final class Recognizer {
             try await next.start(inputSequence: stream)
             let old = analyzer
             analyzer = next
-            let (oldCont, replayed) = lock.withLock { () -> (AsyncStream<AnalyzerInput>.Continuation?, Int) in
+            let (oldCont, replayed, prerollMs) = lock.withLock { () -> (AsyncStream<AnalyzerInput>.Continuation?, Int, Int) in
                 let o = continuation
                 continuation = cont
-                for b in backlog { cont.yield(AnalyzerInput(buffer: b)) }
+                // Pré-roll (fim do que a tarefa velha ouviu) e depois o que chegou sem tarefa: áudio contínuo.
+                let pre = preroll
+                let ms = Int(Double(prerollFrames) * 1000 / (format?.sampleRate ?? 16000))
+                for b in pre + backlog { cont.yield(AnalyzerInput(buffer: b)) }
                 let n = backlog.count
                 backlog = []; backlogFrames = 0
-                return (o, n)
+                // O pré-roll já foi repassado: a tarefa nova começa a juntar o seu.
+                preroll = []; prerollFrames = 0
+                return (o, n, ms)
             }
             oldCont?.finish()
             if let old { Task { await old.cancelAndFinishNow() } }
             startedAt = Date()
             failures = 0
-            logLine("reconhecimento #\(g) iniciado (\(reason)); \(replayed) blocos de áudio repassados")
-            emit(["type": "recognizer", "generation": g, "reason": reason, "replayed": replayed])
+            lastStartAt = Date()
+            logLine("reconhecimento #\(g) iniciado (\(reason)); \(replayed) blocos de áudio repassados + \(prerollMs) ms de pré-roll")
+            emit(["type": "recognizer", "generation": g, "reason": reason, "replayed": replayed, "preroll_ms": prerollMs])
             onState?("ok")
         } catch {
             failures += 1
