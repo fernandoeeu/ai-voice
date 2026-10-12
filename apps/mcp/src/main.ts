@@ -1,18 +1,18 @@
 #!/usr/bin/env bun
 import { BunRuntime, BunServices } from "@effect/platform-bun"
-import { AlexaError } from "@jarvis/alexa"
 import { Cause, Console, Effect, Layer, Logger, Runtime, Schema } from "effect"
 import { Command } from "effect/cli"
 import { cli } from "./cli.ts"
 import { version } from "./server.ts"
+import { SpeakError } from "./speaker.ts"
 
-const isAlexaError = Schema.is(AlexaError)
+const isSpeakError = Schema.is(SpeakError)
 
 const reportFailure = (cause: Cause.Cause<unknown>) => {
   if (Cause.hasInterruptsOnly(cause)) return Effect.void
   const error = Cause.squash(cause)
-  // Alexa errors carry messages that are safe and actionable on their own.
-  if (isAlexaError(error)) return Console.error(error.message)
+  // Alexa and Mac voice errors carry messages that are safe and actionable on their own.
+  if (isSpeakError(error)) return Console.error(error.message)
   // The CLI already rendered its own help or usage errors.
   if (!Runtime.getErrorReported(error)) return Effect.void
   return Effect.logError(cause)

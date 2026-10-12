@@ -12,6 +12,7 @@
 <div
 	bind:this={ref}
 	data-slot="skeleton"
-	class={cn("bg-muted rounded-md animate-pulse", className)}
+	aria-hidden="true"
+	class={cn("animate-pulse rounded-[var(--radius-control)] bg-[color-mix(in_oklch,var(--ink)_7%,transparent)]", className)}
 	{...restProps}
 ></div>

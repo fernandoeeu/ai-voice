@@ -13,7 +13,7 @@ export type JarvisModule = {
 };
 
 export const modules: ReadonlyArray<JarvisModule> = [
-	{ id: 'alexa', label: 'Alexa', href: '/', icon: SpeakerHigh },
+	{ id: 'alexa', label: 'Voz', href: '/', icon: SpeakerHigh },
 	{ id: 'lembretes', label: 'Lembretes', href: '/lembretes', icon: ListChecks },
 	{ id: 'agenda', label: 'Agenda', href: '/agenda', icon: CalendarBlank },
 	{ id: 'ir', label: 'Ir & ligar', href: '/ir', icon: NavigationArrow }

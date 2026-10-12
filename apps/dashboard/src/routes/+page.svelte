@@ -2,60 +2,67 @@
 	import { refreshAll } from '$app/navigation';
 	import ArrowClockwise from 'phosphor-svelte/lib/ArrowClockwise';
 	import DeliveryFailure from '#lib/components/alexa/delivery-failure.svelte';
-	import SessionMissing from '#lib/components/alexa/session-missing.svelte';
 	import SpeakDesk from '#lib/components/alexa/speak-desk.svelte';
 	import ModuleHeader from '#lib/components/jarvis/module-header.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
+	import { voiceName } from '#lib/alexa/voice.js';
+	import { Latest } from '#lib/jarvis/latest.svelte.js';
 	import type { PageProps } from './$types';
 
 	let { data, form }: PageProps = $props();
 
-	let refreshing = $state(false);
+	// The Echo list is streamed from Amazon; the last answer stays on screen while a new one is read.
+	const latest = new Latest(() => data.echoes);
+	const echoes = $derived(latest.value);
+	const reading = $derived(latest.pending);
 
-	async function refresh() {
-		refreshing = true;
-		await refreshAll().finally(() => (refreshing = false));
-	}
-
-	const devices = $derived(data.devices.ok ? data.devices.value : []);
-	const online = $derived(devices.filter((d) => d.online).length);
-	const speechEnabled = $derived(data.settings.ok && data.settings.value.speechEnabled);
+	const settings = $derived(data.settings);
+	const voice = $derived(data.voice);
+	const speechEnabled = $derived(settings.ok ? settings.value.speechEnabled : undefined);
+	const devices = $derived(echoes?.ok ? echoes.value : undefined);
+	const online = $derived(devices ? devices.filter((d) => d.online).length : 0);
 </script>
 
 <svelte:head>
-	<title>Alexa · Jarvis</title>
+	<title>Voz · Jarvis</title>
 </svelte:head>
 
 <div class="mx-auto grid max-w-[72rem] gap-8">
-	<ModuleHeader title="Alexa">
+	<ModuleHeader title="Voz">
 		{#snippet summary()}
-			{#if data.devices.ok}
-				<span class="tabular">{devices.length}</span>
-				{devices.length === 1 ? 'Echo' : 'Echos'} na conta,
-				<span class="tabular">{online}</span>
-				{online === 1 ? 'online' : 'online'}.
-				{speechEnabled ? 'Fala ativada.' : 'Fala desativada.'}
+			{#if speechEnabled === false}
+				Fala desativada neste servidor.
+			{:else if voice.ok && voice.value.engine === 'kokoro'}
+				Fala no Mac com a voz {voiceName(voice.value.voice)}, pelo Kokoro local.
+			{:else if voice.ok}
+				Fala no Mac com a voz do sistema; o Kokoro não respondeu.
 			{:else}
-				Sem acesso aos Echos agora.
+				Voz do Mac sem configuração.
+			{/if}
+			{#if devices}
+				<span class="whitespace-nowrap">
+					<span class="tabular">{online}</span> de <span class="tabular">{devices.length}</span>
+					{devices.length === 1 ? 'Echo online' : 'Echos online'}.
+				</span>
+			{:else if echoes}
+				<span class="whitespace-nowrap">Echos indisponíveis.</span>
+			{:else}
+				<span class="whitespace-nowrap">Consultando os Echos…</span>
 			{/if}
 		{/snippet}
 		{#snippet actions()}
-			<Button variant="outline" onclick={refresh} disabled={refreshing}>
-				<ArrowClockwise class={['size-4', refreshing && 'animate-spin']} weight="bold" aria-hidden="true" />
-				{refreshing ? 'Atualizando…' : 'Atualizar'}
+			<Button variant="outline" onclick={() => refreshAll()} disabled={reading}>
+				<ArrowClockwise class={['size-4', reading && 'animate-spin']} weight="bold" aria-hidden="true" />
+				{reading && echoes ? 'Atualizando…' : 'Atualizar'}
 			</Button>
 		{/snippet}
 	</ModuleHeader>
 
-	<div class={['transition-opacity duration-200', refreshing && 'opacity-60']} aria-busy={refreshing}>
-		{#if !data.settings.ok}
-			<DeliveryFailure failure={data.settings.failure} />
-		{:else if !data.devices.ok && data.devices.failure.kind === 'session'}
-			<SessionMissing message={data.devices.failure.message} />
-		{:else if !data.devices.ok}
-			<DeliveryFailure failure={data.devices.failure} />
-		{:else}
-			<SpeakDesk {devices} {speechEnabled} maxLength={data.maxLength} result={form} />
-		{/if}
-	</div>
+	{#if !settings.ok}
+		<DeliveryFailure failure={settings.failure} />
+	{:else}
+		<div class={['transition-opacity duration-200', reading && echoes && 'opacity-80']} aria-busy={reading}>
+			<SpeakDesk {voice} {echoes} {speechEnabled} maxLength={data.maxLength} result={form} />
+		</div>
+	{/if}
 </div>

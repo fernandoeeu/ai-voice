@@ -1,18 +1,15 @@
-import { Context, Duration, Effect, Layer, Stream } from "effect"
-import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import type { PlatformError } from "effect/PlatformError"
+import { Context, Duration, Effect, Layer } from "effect"
+import { type ChildProcess, ChildProcessSpawner } from "effect/process"
 import { AutomationError } from "./apple-error.ts"
+import { command, execute } from "./process.ts"
 
 export const FIELD_SEPARATOR = "\u001f"
 export const RECORD_SEPARATOR = "\u001e"
 
 const OSASCRIPT = "/usr/bin/osascript"
 const OPEN = "/usr/bin/open"
-const TIMEOUT = Duration.seconds(15)
-// SIGTERM first; a process that ignores it is SIGKILLed after this grace period.
-const FORCE_KILL_AFTER = Duration.seconds(2)
-// Upper bound, in UTF-16 code units, for what is kept from stdout or stderr.
-const MAX_OUTPUT = 1_000_000
+// Default per-process deadline; `run` callers with a known-slow query may raise it.
+const DEFAULT_TIMEOUT = Duration.seconds(15)
 
 const E164_BODY = /^\+[1-9]\d{7,14}$/
 const MAPS_HOST = "maps.apple.com"
@@ -58,8 +55,17 @@ const describeFailure = (stderr: string): string => {
 // leading or trailing whitespace inside the returned value survives.
 const stripFinalNewline = (output: string): string => output.endsWith("\n") ? output.slice(0, -1) : output
 
+export interface RunOptions {
+  // Deadline for this call only; defaults to 15 seconds.
+  readonly timeout?: Duration.Input
+}
+
 export class Osascript extends Context.Service<Osascript, {
-  readonly run: (script: string, args?: ReadonlyArray<string>) => Effect.Effect<string, AutomationError>
+  readonly run: (
+    script: string,
+    args?: ReadonlyArray<string>,
+    options?: RunOptions
+  ) => Effect.Effect<string, AutomationError>
   readonly open: (url: string) => Effect.Effect<void, AutomationError>
 }>()("@jarvis/apple/Osascript") {
   static readonly layer = Layer.effect(
@@ -67,50 +73,27 @@ export class Osascript extends Context.Service<Osascript, {
     Effect.gen(function*() {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
 
-      const collect = (bytes: Stream.Stream<Uint8Array, PlatformError>, label: string) =>
-        bytes.pipe(
-          Stream.decodeText(),
-          Stream.runFoldEffect(() => "", (output, chunk: string) =>
-            output.length + chunk.length > MAX_OUTPUT
-              ? Effect.fail(new AutomationError({ message: `${label} produced too much output.` }))
-              : Effect.succeed(output + chunk))
-        )
-
-      // The process lives in the scope: on success, failure, timeout or
-      // interruption the scope closes and the spawner kills its process group.
-      const exec = (command: ChildProcess.Command, label: string) =>
-        Effect.gen(function*() {
-          const handle = yield* spawner.spawn(command)
-          return yield* Effect.all({
-            stdout: collect(handle.stdout, label),
-            stderr: collect(handle.stderr, label),
-            exitCode: handle.exitCode
-          }, { concurrency: "unbounded" })
-        }).pipe(
-          Effect.scoped,
-          Effect.catchTag("PlatformError", () => Effect.fail(new AutomationError({ message: `Could not run ${label}.` }))),
-          Effect.timeoutOrElse({
-            duration: TIMEOUT,
-            orElse: () =>
-              Effect.fail(
-                new AutomationError({ message: `${label} did not finish within ${Duration.format(TIMEOUT)}.` })
-              )
-          }),
+      const exec = (command: ChildProcess.Command, label: string, timeout: Duration.Duration) =>
+        execute(spawner, command, label, timeout).pipe(
           Effect.filterOrElse(
             ({ exitCode }) => exitCode === ChildProcessSpawner.ExitCode(0),
             ({ stderr }) => Effect.fail(new AutomationError({ message: describeFailure(stderr) }))
           )
         )
 
-      const options = { stdin: "ignore", forceKillAfter: FORCE_KILL_AFTER } as const
-
       // The script is always a constant; caller values only ever travel as argv,
       // read inside the script through `on run argv`. `--` keeps a value that
       // starts with `-` from being parsed as an osascript option.
-      const run = Effect.fn("Osascript.run")(function*(script: string, args: ReadonlyArray<string> = []) {
+      const run = Effect.fn("Osascript.run")(function*(
+        script: string,
+        args: ReadonlyArray<string> = [],
+        runOptions: RunOptions = {}
+      ) {
+        const timeout = runOptions.timeout === undefined ? DEFAULT_TIMEOUT : Duration.fromInputUnsafe(runOptions.timeout)
         const { stdout } = yield* exec(
-          ChildProcess.make(OSASCRIPT, ["-e", script, "--", ...args], options),
-          "AppleScript"
+          command(OSASCRIPT, ["-e", script, "--", ...args]),
+          "AppleScript",
+          timeout
         )
         return stripFinalNewline(stdout)
       })
@@ -122,7 +105,7 @@ export class Osascript extends Context.Service<Osascript, {
         }
         // `href` is the normalized form (lower-case scheme, no whitespace or
         // control characters), so what was checked is exactly what is opened.
-        yield* exec(ChildProcess.make(OPEN, [parsed.href], options), "open")
+        yield* exec(command(OPEN, [parsed.href]), "open", DEFAULT_TIMEOUT)
       })
 
       return Osascript.of({ run, open })

@@ -11,14 +11,14 @@
 	<title>Ir & ligar · Jarvis</title>
 </svelte:head>
 
-<div class="mx-auto grid max-w-[72rem] gap-8">
+<div class="mx-auto grid max-w-[72rem] gap-7">
 	<ModuleHeader title="Ir & ligar">
 		{#snippet summary()}
-			Abra o Maps do Mac com uma busca ou rota e inicie ligações pelo iPhone ou FaceTime.
+			Buscas e rotas abrem no Mapas do Mac; ligações saem pelo iPhone ou pelo FaceTime, sempre com a sua confirmação.
 		{/snippet}
 	</ModuleHeader>
 
-	<div class="grid items-start gap-x-14 gap-y-10 lg:grid-cols-2">
+	<div class="grid grid-cols-1 items-start gap-x-8 gap-y-8 lg:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] xl:gap-x-10">
 		<MapsPanel result={form} />
 		<CallPanel result={form} />
 	</div>

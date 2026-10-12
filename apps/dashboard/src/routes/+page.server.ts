@@ -1,19 +1,23 @@
 import { MAX_TEXT_LENGTH } from '@jarvis/alexa';
 import { fail } from '@sveltejs/kit';
-import type { AlexaFailure } from '#lib/alexa/failure.js';
-import { listDevices, readSettings, speak } from '#lib/server/alexa-gateway.js';
+import type { AlexaFailure, SpeechReceipt } from '#lib/alexa/failure.js';
+import { listDevices, readMacVoice, readSettings, speak } from '#lib/server/alexa-gateway.js';
 import { parseSpeakForm } from '#lib/server/speak-form.js';
 import type { Actions, PageServerLoad } from './$types';
 
 export const load: PageServerLoad = async () => {
-	const [settings, devices] = await Promise.all([readSettings(), listDevices()]);
-	return { settings, devices, maxLength: MAX_TEXT_LENGTH };
+	// The Mac is the default output: its state is read up front (config plus a local health check).
+	// The Echo roster is streamed, because Amazon can take seconds and the Mac does not need it.
+	const [settings, voice] = await Promise.all([readSettings(), readMacVoice()]);
+	const echoes = listDevices();
+	return { settings, voice, echoes, maxLength: MAX_TEXT_LENGTH };
 };
 
 const status: Record<AlexaFailure['kind'], number> = {
 	session: 401,
 	device: 409,
 	speech: 422,
+	voice: 503,
 	config: 424,
 	unexpected: 424
 };
@@ -31,6 +35,7 @@ export const actions = {
 				failure: outcome.failure
 			});
 		}
-		return { accepted: { ...outcome.value, text: form.input.text, at: Date.now() } };
+		const receipt: SpeechReceipt = { ...outcome.value, text: form.input.text, at: Date.now() };
+		return { device: form.device, accepted: receipt };
 	}
 } satisfies Actions;

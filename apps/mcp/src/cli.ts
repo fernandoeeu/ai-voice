@@ -1,8 +1,11 @@
 import { Alexa, AlexaConfig, login } from "@jarvis/alexa"
+import { AnnounceConfig, Announcer } from "@jarvis/announce"
 import { Config, Console, Effect, Layer, Option, Schema } from "effect"
-import { Command } from "effect/cli"
+import { Command, Flag } from "effect/cli"
 import { FetchHttpClient } from "effect/http"
+import { announce } from "./announce.ts"
 import { HttpTransport } from "./http-transport.ts"
+import { SpeechLive } from "./speaker.ts"
 import { StdioTransport } from "./server.ts"
 import { EchoDevice } from "./voice-toolkit.ts"
 
@@ -18,11 +21,10 @@ const HttpOptions = Config.all({
 
 const serve = Effect.gen(function*() {
   const { hostname, port } = yield* HttpOptions
-  const transport = Option.match(port, {
-    onNone: () => StdioTransport,
-    onSome: (port) => HttpTransport({ hostname, port })
+  return yield* Option.match(port, {
+    onNone: () => Layer.launch(StdioTransport),
+    onSome: (port) => Layer.launch(HttpTransport({ hostname, port }))
   })
-  return yield* Layer.launch(transport)
 })
 
 const loginCommand = Command.make("login", {}, () => login).pipe(
@@ -42,12 +44,30 @@ const devicesCommand = Command.make("devices", {}, () =>
     Command.provide(AlexaLive)
   )
 
+const announceCommand = Command.make("announce", {
+  body: Flag.String("body").pipe(Flag.withDescription("Text to announce; defaults to the hook message on stdin."), Flag.optional),
+  title: Flag.String("title").pipe(Flag.withDescription("Notification title."), Flag.optional),
+  event: Flag.String("event").pipe(
+    Flag.withDescription("permission, waiting, finished or error; defaults to the hook event."),
+    Flag.optional
+  ),
+  project: Flag.String("project").pipe(Flag.withDescription("Project name; defaults to the hook cwd."), Flag.optional),
+  source: Flag.String("source").pipe(Flag.withDescription("Who is announcing."), Flag.withDefault("claude-code"))
+}, announce).pipe(
+  Command.withDescription(
+    "Speak a short pt-BR notification from flags or a Claude Code hook JSON on stdin; skips are logged to stderr."
+  ),
+  Command.provide(Announcer.layer.pipe(Layer.provide(AnnounceConfig.layer))),
+  Command.provide(SpeechLive)
+)
+
 /**
  * `jarvis-voice` serves MCP (stdio, or HTTP when `AI_VOICE_HTTP_PORT` is set);
- * `login` and `devices` manage the local Amazon session.
+ * `login` and `devices` manage the local Amazon session; `announce` speaks hook notifications
+ * on the output chosen by `AI_VOICE_OUTPUT`.
  */
 export const cli = Command.make("jarvis-voice", {}, () => serve).pipe(
-  Command.withDescription("MCP server that lets AI agents speak through an Amazon Echo."),
-  Command.provide(AlexaLive),
-  Command.withSubcommands([loginCommand, devicesCommand])
+  Command.withDescription("MCP server that lets AI agents speak on this Mac (AI_VOICE_OUTPUT=mac) or an Amazon Echo."),
+  Command.provide(SpeechLive),
+  Command.withSubcommands([loginCommand, devicesCommand, announceCommand])
 )

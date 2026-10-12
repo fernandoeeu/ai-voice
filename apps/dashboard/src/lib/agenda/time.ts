@@ -63,17 +63,55 @@ export const formatLongDay = (key: string) => longDay.format(dayStartMs(key) + D
 export const formatWeekday = (key: string) => weekdayShort.format(dayStartMs(key) + DAY_MS / 2).replace('.', '');
 export const formatDayMonth = (key: string) => dayMonth.format(dayStartMs(key) + DAY_MS / 2).replace('.', '');
 
+const weekdayLong = new Intl.DateTimeFormat('pt-BR', { timeZone: ZONE, weekday: 'long' });
+const monthLong = new Intl.DateTimeFormat('pt-BR', { timeZone: ZONE, month: 'long' });
+const monthShort = new Intl.DateTimeFormat('pt-BR', { timeZone: ZONE, month: 'short' });
+
+/** The pieces of a date, for layouts that set the day number apart from its words. */
+export const dateParts = (key: string) => {
+	const noon = dayStartMs(key) + DAY_MS / 2;
+	return {
+		day: String(Number(key.slice(8, 10))),
+		weekday: weekdayLong.format(noon),
+		weekdayShort: weekdayShort.format(noon).replace('.', ''),
+		month: monthLong.format(noon),
+		monthShort: monthShort.format(noon).replace('.', '')
+	};
+};
+
+/** "5 min", "1 h", "2 h 15 min": a span in words, rounded up to the minute. */
+export const formatSpan = (ms: number) => {
+	const minutes = Math.max(1, Math.ceil(ms / 60000));
+	if (minutes < 60) return `${minutes} min`;
+	const hours = Math.floor(minutes / 60);
+	const rest = minutes % 60;
+	return rest === 0 ? `${hours} h` : `${hours} h ${rest} min`;
+};
+
 export type Occurrence = {
+	/** Unique within one answer: event id plus the occurrence's start. */
+	readonly key: string;
 	readonly event: CalendarEvent;
 	readonly start: number;
 	readonly end: number;
 };
 
-export const occurrences = (events: ReadonlyArray<CalendarEvent>): Array<Occurrence> =>
-	events.map((event) => {
+/**
+ * One entry per event occurrence. Two calendars with the same name (a holiday feed subscribed from two
+ * accounts) deliver the very same occurrence twice; it is drawn once, and `key` stays unique for lists.
+ */
+export const occurrences = (events: ReadonlyArray<CalendarEvent>): Array<Occurrence> => {
+	const seen = new Set<string>();
+	const result: Array<Occurrence> = [];
+	for (const event of events) {
+		const key = `${event.id}@${event.start}`;
+		if (seen.has(key)) continue;
+		seen.add(key);
 		const start = Date.parse(event.start);
-		return { event, start, end: Math.max(Date.parse(event.end), start + 1) };
-	});
+		result.push({ key, event, start, end: Math.max(Date.parse(event.end), start + 1) });
+	}
+	return result;
+};
 
 /** Events that touch the given local day. */
 export const forDay = (items: ReadonlyArray<Occurrence>, key: string) => {
@@ -82,14 +120,19 @@ export const forDay = (items: ReadonlyArray<Occurrence>, key: string) => {
 	return items.filter((item) => item.start < to && item.end > from);
 };
 
-/** Stable pick among a few ink tones, so a calendar keeps its color everywhere. */
-export const TONES = ['carbon', 'signal', 'caution', 'soft'] as const;
-export type Tone = (typeof TONES)[number];
-export const toneOf = (calendar: string): Tone => {
+/**
+ * Calendars get one of six hues, picked by a stable hash of the name, so a calendar keeps its color on
+ * every screen. The hues themselves live on the agenda page (`--cal-0` … `--cal-5`, light and dark).
+ */
+const TONE_COUNT = 6;
+export const toneOf = (calendar: string): number => {
 	let hash = 0;
 	for (const char of calendar) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
-	return TONES[hash % TONES.length]!;
+	return hash % TONE_COUNT;
 };
+
+/** Inline style that hands a calendar's hue to the `cal-*` classes below it. */
+export const toneStyle = (calendar: string) => `--cal: var(--cal-${toneOf(calendar)})`;
 
 export type Placed = {
 	readonly item: Occurrence;
@@ -102,15 +145,19 @@ export type Placed = {
 
 const MIN_VISUAL = 30;
 
+/** Start and end in minutes within one day: cut at its edges, never thinner than a readable block. */
+export const clampedMinutes = (item: Occurrence, key: string) => {
+	const dayStart = dayStartMs(key);
+	const start = Math.max(0, Math.round((item.start - dayStart) / 60000));
+	const end = Math.min(24 * 60, Math.round((item.end - dayStart) / 60000));
+	return { start, end: Math.max(end, start + MIN_VISUAL) };
+};
+
 /** Splits overlapping events into side-by-side lanes, clamped to the given day. */
 export const layoutDay = (items: ReadonlyArray<Occurrence>, key: string, windowStart: number): Array<Placed> => {
 	const dayStart = dayStartMs(key);
 	const clamped = items
-		.map((item) => {
-			const start = Math.max(0, Math.round((item.start - dayStart) / 60000));
-			const end = Math.min(24 * 60, Math.round((item.end - dayStart) / 60000));
-			return { item, start, end: Math.max(end, start + MIN_VISUAL) };
-		})
+		.map((item) => ({ item, ...clampedMinutes(item, key) }))
 		.sort((a, b) => a.start - b.start || b.end - a.end);
 
 	const placed: Array<Placed> = [];
@@ -147,12 +194,6 @@ export const layoutDay = (items: ReadonlyArray<Occurrence>, key: string, windowS
 	return placed;
 };
 
-export const toneBar: Record<Tone, string> = {
-	carbon: 'bg-carbon',
-	signal: 'bg-signal',
-	caution: 'bg-caution',
-	soft: 'bg-ink-soft'
-};
 
 /** How an occurrence reads inside one day's row, trimming the parts that belong to other days. */
 export const timeLabel = (item: Occurrence, key: string) => {

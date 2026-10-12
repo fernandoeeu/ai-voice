@@ -1,410 +1,330 @@
+import { BunServices } from "@effect/platform-bun"
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer, Ref } from "effect"
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { Duration, Effect, Fiber, Layer, Sink, Stream } from "effect"
+import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 import { AutomationError } from "../src/apple-error.ts"
+import { buildHelper, CalendarHelper } from "../src/calendar-helper.ts"
 import { Calendar } from "../src/calendar.ts"
-import { FIELD_SEPARATOR as US, Osascript, RECORD_SEPARATOR as RS } from "../src/osascript.ts"
 
-// Pin a zone with DST so recurrence expansion is checked across offset changes.
-// Every other assertion is computed from local `Date`s, so it follows this zone.
+// Pin a zone with DST so offsets in the formatted output are predictable.
 process.env.TZ = "America/New_York"
 
-interface Call {
-  readonly script: string
-  readonly args: ReadonlyArray<string>
+const HELPER = "/opt/jarvis/bin/calendar-events"
+
+interface Reply {
+  readonly stdout?: string
+  readonly stderr?: string
+  readonly exitCode?: number
+  readonly hang?: boolean
 }
 
-const makeFake = (respond: (call: Call) => string | AutomationError) =>
-  Effect.gen(function*() {
-    const calls = yield* Ref.make<ReadonlyArray<Call>>([])
-    const osascript = Osascript.of({
-      run: (script, args = []) => {
-        const call = { script, args }
-        return Ref.update(calls, (all) => [...all, call]).pipe(
-          Effect.andThen(() => {
-            const result = respond(call)
-            return typeof result === "string" ? Effect.succeed(result) : Effect.fail(result)
-          })
-        )
-      },
-      open: () => Effect.void
+// Never spawns anything: records each command and answers with a canned reply.
+const fakeSpawner = (respond: (command: ChildProcess.StandardCommand) => Reply = () => ({})) => {
+  const commands: Array<ChildProcess.StandardCommand> = []
+  const spawner = ChildProcessSpawner.make((command) =>
+    Effect.sync(() => {
+      if (!ChildProcess.isStandardCommand(command)) throw new Error("unexpected piped command")
+      commands.push(command)
+      const reply = respond(command)
+      const stdout = Stream.encodeText(Stream.make(reply.stdout ?? ""))
+      const stderr = Stream.encodeText(Stream.make(reply.stderr ?? ""))
+      return ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(1),
+        exitCode: reply.hang === true ? Effect.never : Effect.succeed(ChildProcessSpawner.ExitCode(reply.exitCode ?? 0)),
+        isRunning: Effect.succeed(reply.hang === true),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        stdout,
+        stderr,
+        all: Stream.merge(stdout, stderr),
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void)
+      })
     })
-    return { calls, layer: Calendar.layer.pipe(Layer.provide(Layer.succeed(Osascript, osascript))) }
-  })
+  )
+  return { commands, spawner: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner) }
+}
 
-const row = (
-  fields: {
-    readonly id: string
-    readonly title: string
-    readonly calendar?: string
-    readonly start: readonly [number, number, number, number, number, number]
-    readonly end: readonly [number, number, number, number, number, number]
-    readonly allDay?: boolean
-    readonly location?: string
-    readonly recurrence?: string
-    readonly excluded?: string
-  }
-) =>
-  [
-    fields.id,
-    fields.title,
-    fields.calendar ?? "Work",
-    ...fields.start,
-    ...fields.end,
-    String(fields.allDay ?? false),
-    fields.location ?? "",
-    fields.recurrence ?? "",
-    fields.excluded ?? ""
-  ].join(US) + RS
+const withHelper = (respond: (command: ChildProcess.StandardCommand) => Reply) => {
+  const fake = fakeSpawner(respond)
+  const layer = Calendar.layerWithoutHelper.pipe(
+    Layer.provide(CalendarHelper.layerAt(HELPER)),
+    Layer.provide(fake.spawner)
+  )
+  return { commands: fake.commands, layer }
+}
 
-const localParts = (date: Date) => [
-  date.getFullYear(),
-  date.getMonth() + 1,
-  date.getDate(),
-  date.getHours(),
-  date.getMinutes(),
-  date.getSeconds()
-].map(String)
+const json = (events: ReadonlyArray<Record<string, unknown>>) => JSON.stringify({ events }) + "\n"
 
-const FROM = "2026-10-11T00:00:00.000Z"
-const TO = "2026-10-12T00:00:00.000Z"
+const at = (iso: string) => Date.parse(iso)
 
-describe("Calendar", () => {
-  it.effect("lists calendar names and uses a constant script", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => `Work${RS}Home${RS}`)
-      const names = yield* Calendar.use((calendar) => calendar.calendars).pipe(Effect.provide(fake.layer))
+const FROM = "2026-10-11T04:00:00.000Z"
+const TO = "2026-10-12T04:00:00.000Z"
+
+describe("Calendar (EventKit helper)", () => {
+  it.effect("lists calendar names through the helper with a fixed argv", () => {
+    const { commands, layer } = withHelper(() => ({ stdout: JSON.stringify({ calendars: ["Work", "Home"] }) }))
+    return Effect.gen(function*() {
+      const names = yield* Calendar.use((calendar) => calendar.calendars)
       assert.deepStrictEqual(names, ["Work", "Home"])
-      const [call] = yield* Ref.get(fake.calls)
-      assert.deepStrictEqual(call?.args, [])
-      assert.include(call?.script, "on run argv")
-    }))
-
-  it.effect("passes local date parts and the calendar name only through argv", () =>
-    Effect.gen(function*() {
-      const hostile = `Work" & (do shell script "rm -rf ~") & "`
-      const fake = yield* makeFake(() => "")
-      const events = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO, calendar: hostile })).pipe(
-        Effect.provide(fake.layer)
-      )
-      assert.deepStrictEqual(events, [])
-      const [call] = yield* Ref.get(fake.calls)
-      assert.notInclude(call?.script, "rm -rf")
-      assert.notInclude(call?.script, hostile)
-      assert.include(call?.script, "on run argv")
-      assert.deepStrictEqual(call?.args, [
-        hostile,
-        ...localParts(new Date(FROM)),
-        ...localParts(new Date(TO))
-      ])
-    }))
-
-  it.effect("uses the same script for every request and an empty calendar filter by default", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => "")
-      yield* Calendar.use((calendar) =>
-        Effect.all([
-          calendar.events({ from: FROM, to: TO }),
-          calendar.events({ from: FROM, to: TO, calendar: "Home" })
-        ])
-      ).pipe(Effect.provide(fake.layer))
-      const [first, second] = yield* Ref.get(fake.calls)
-      assert.strictEqual(first?.script, second?.script)
-      assert.strictEqual(first?.args[0], "")
-      assert.strictEqual(second?.args[0], "Home")
-    }))
-
-  it.effect("parses records into ISO events sorted by start", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() =>
-        row({ id: "b", title: "Lunch", start: [2026, 10, 11, 12, 0, 0], end: [2026, 10, 11, 13, 0, 0], location: "Cafe" })
-        + row({ id: "c", title: "Holiday", start: [2026, 10, 11, 0, 0, 0], end: [2026, 10, 12, 0, 0, 0], allDay: true })
-        + row({ id: "a", title: "Standup", start: [2026, 10, 11, 9, 30, 0], end: [2026, 10, 11, 9, 45, 0] })
-      )
-      const events = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO })).pipe(
-        Effect.provide(fake.layer)
-      )
-      assert.deepStrictEqual(events.map((event) => event.id), ["c", "a", "b"])
-      assert.strictEqual(events[0]?.allDay, true)
-      assert.isUndefined(events[1]?.location)
-      assert.strictEqual(events[2]?.location, "Cafe")
-      const offsetIso = /^2026-10-11T09:30:00\.000(Z|[+-]\d{2}:\d{2})$/
-      assert.match(events[1]?.start ?? "", offsetIso)
-    }))
-
-  it.effect("keeps titles that contain punctuation intact", () =>
-    Effect.gen(function*() {
-      const title = `Dentist "Dr. O'Neil" \\ ; $(whoami)`
-      const fake = yield* makeFake(() => row({ id: "x", title, start: [2026, 10, 11, 8, 0, 0], end: [2026, 10, 11, 9, 0, 0] }))
-      const events = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO })).pipe(
-        Effect.provide(fake.layer)
-      )
-      assert.strictEqual(events[0]?.title, title)
-    }))
-
-  it.effect.each([
-    { name: "reversed range", from: TO, to: FROM },
-    { name: "empty range", from: FROM, to: FROM },
-    { name: "span over 31 days", from: FROM, to: "2026-11-12T00:00:00.000Z" },
-    { name: "invalid from", from: "not a date", to: TO },
-    { name: "invalid to", from: FROM, to: "tomorrow-ish" }
-  ])("rejects $name without running a script", ({ from, to }) =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => "")
-      const error = yield* Calendar.use((calendar) => calendar.events({ from, to })).pipe(
-        Effect.provide(fake.layer),
-        Effect.flip
-      )
-      assert.instanceOf(error, AutomationError)
-      assert.lengthOf(yield* Ref.get(fake.calls), 0)
-    }))
-
-  it.effect("accepts exactly 31 days", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => "")
-      yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: "2026-11-11T00:00:00.000Z" })).pipe(
-        Effect.provide(fake.layer)
-      )
-      assert.lengthOf(yield* Ref.get(fake.calls), 1)
-    }))
-
-  it.effect("rejects an empty calendar name", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => "")
-      const error = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO, calendar: "  " })).pipe(
-        Effect.provide(fake.layer),
-        Effect.flip
-      )
-      assert.instanceOf(error, AutomationError)
-      assert.lengthOf(yield* Ref.get(fake.calls), 0)
-    }))
-
-  it.effect("fails with AutomationError on malformed output", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => `only${US}three${US}fields${RS}`)
-      const error = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO })).pipe(
-        Effect.provide(fake.layer),
-        Effect.flip
-      )
-      assert.instanceOf(error, AutomationError)
-    }))
-
-  it.effect("propagates osascript failures", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => new AutomationError({ message: "denied" }))
-      const error = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO })).pipe(
-        Effect.provide(fake.layer),
-        Effect.flip
-      )
-      assert.strictEqual(error.message, "denied")
-    }))
-
-  it.effect("today queries the local day of the test clock", () =>
-    Effect.gen(function*() {
-      const now = new Date(2026, 9, 11, 15, 20, 0)
-      yield* TestClock.setTime(now.getTime())
-      const fake = yield* makeFake(() => "")
-      yield* Calendar.use((calendar) => calendar.today).pipe(Effect.provide(fake.layer))
-      const [call] = yield* Ref.get(fake.calls)
-      assert.deepStrictEqual(call?.args, [
-        "",
-        ...localParts(new Date(2026, 9, 11, 0, 0, 0)),
-        ...localParts(new Date(2026, 9, 12, 0, 0, 0))
-      ])
-    }))
-
-  it.effect("today moves to the next day when the clock crosses local midnight", () =>
-    Effect.gen(function*() {
-      yield* TestClock.setTime(new Date(2026, 9, 11, 23, 59, 59).getTime())
-      const fake = yield* makeFake(() => "")
-      const run = Calendar.use((calendar) => calendar.today).pipe(Effect.provide(fake.layer))
-      yield* run
-      yield* TestClock.adjust(2_000)
-      yield* run
-      const calls = yield* Ref.get(fake.calls)
-      assert.strictEqual(calls[0]?.args[3], "11")
-      assert.strictEqual(calls[1]?.args[3], "12")
-    }))
-
-  describe("recurring events", () => {
-    const run = (output: string, from: string, to: string) =>
-      Effect.gen(function*() {
-        const fake = yield* makeFake(() => output)
-        return yield* Calendar.use((calendar) => calendar.events({ from, to })).pipe(Effect.provide(fake.layer))
-      })
-
-    // Monday 2026-01-05 10:00-11:00 EST, weekly on Mondays.
-    const weekly = (extra: { readonly recurrence?: string; readonly excluded?: string } = {}) =>
-      row({
-        id: "standup",
-        title: "Weekly",
-        start: [2026, 1, 5, 10, 0, 0],
-        end: [2026, 1, 5, 11, 0, 0],
-        recurrence: "FREQ=WEEKLY;INTERVAL=1;BYDAY=MO",
-        ...extra
-      })
-    const JULY_6 = "2026-07-06T00:00:00-04:00"
-    const JULY_7 = "2026-07-07T00:00:00-04:00"
-
-    it.effect("expands a master created months earlier into the queried day, keeping wall-clock time across DST", () =>
-      Effect.gen(function*() {
-        const events = yield* run(weekly(), JULY_6, JULY_7)
-        assert.deepStrictEqual(events.map(({ end, id, start }) => ({ id, start, end })), [
-          { id: "standup", start: "2026-07-06T10:00:00.000-04:00", end: "2026-07-06T11:00:00.000-04:00" }
-        ])
-      }))
-
-    it.effect("drops excluded dates", () =>
-      Effect.gen(function*() {
-        assert.lengthOf(yield* run(weekly({ excluded: "2026-6-29,2026-7-6" }), JULY_6, JULY_7), 0)
-      }))
-
-    it.effect.each([
-      { name: "COUNT already used up", recurrence: "FREQ=WEEKLY;BYDAY=MO;COUNT=3", expected: 0 },
-      { name: "UNTIL in the past", recurrence: "FREQ=WEEKLY;BYDAY=MO;UNTIL=20260301T045959Z", expected: 0 },
-      { name: "date-only UNTIL on the day (inclusive)", recurrence: "FREQ=WEEKLY;BYDAY=MO;UNTIL=20260706", expected: 1 },
-    ])("honours $name", ({ expected, recurrence }) =>
-      Effect.gen(function*() {
-        const output = weekly({ recurrence })
-        assert.lengthOf(yield* run(output, JULY_6, JULY_7), expected)
-      }))
-
-    it.effect("INTERVAL=2 includes every other week", () =>
-      Effect.gen(function*() {
-        const output = row({
-          id: "x",
-          title: "Biweekly",
-          start: [2026, 1, 5, 10, 0, 0],
-          end: [2026, 1, 5, 11, 0, 0],
-          recurrence: "FREQ=WEEKLY;INTERVAL=2;BYDAY=MO"
-        })
-        const events = yield* run(output, "2026-07-01T00:00:00-04:00", "2026-07-31T00:00:00-04:00")
-        assert.deepStrictEqual(events.map((event) => event.start.slice(0, 10)), ["2026-07-06", "2026-07-20"])
-      }))
-
-    it.effect("expands monthly last-Friday and last-weekday rules", () =>
-      Effect.gen(function*() {
-        const output = row({
-          id: "a",
-          title: "Last Friday",
-          start: [2026, 1, 30, 9, 0, 0],
-          end: [2026, 1, 30, 9, 30, 0],
-          recurrence: "FREQ=MONTHLY;INTERVAL=1;BYDAY=-1FR"
-        }) + row({
-          id: "b",
-          title: "Last weekday",
-          start: [2026, 1, 30, 17, 0, 0],
-          end: [2026, 1, 30, 17, 30, 0],
-          recurrence: "FREQ=MONTHLY;BYSETPOS=-1;BYDAY=MO,TU,WE,TH,FR"
-        }) + row({
-          id: "c",
-          title: "On the 31st",
-          start: [2026, 1, 31, 8, 0, 0],
-          end: [2026, 1, 31, 8, 30, 0],
-          recurrence: "FREQ=MONTHLY"
-        })
-        const september = yield* run(output, "2026-09-01T00:00:00-04:00", "2026-10-01T00:00:00-04:00")
-        assert.deepStrictEqual(september.map(({ id, start }) => `${id} ${start}`), [
-          "a 2026-09-25T09:00:00.000-04:00",
-          "b 2026-09-30T17:00:00.000-04:00"
-        ])
-        const october = yield* run(output, "2026-10-01T00:00:00-04:00", "2026-11-01T00:00:00-04:00")
-        assert.deepStrictEqual(october.map(({ id, start }) => `${id} ${start}`), [
-          "a 2026-10-30T09:00:00.000-04:00",
-          "b 2026-10-30T17:00:00.000-04:00",
-          "c 2026-10-31T08:00:00.000-04:00"
-        ])
-      }))
-
-    it.effect("expands a yearly all-day birthday whose master is centuries old", () =>
-      Effect.gen(function*() {
-        const output = row({
-          id: "bday",
-          title: "Birthday",
-          calendar: "Birthdays",
-          start: [1604, 10, 11, 0, 0, 0],
-          end: [1604, 10, 12, 0, 0, 0],
-          allDay: true,
-          recurrence: "FREQ=YEARLY;INTERVAL=1"
-        })
-        const events = yield* run(output, "2026-10-11T00:00:00-04:00", "2026-10-12T00:00:00-04:00")
-        assert.deepStrictEqual(events.map(({ allDay, end, start }) => ({ allDay, start, end })), [
-          { allDay: true, start: "2026-10-11T00:00:00.000-04:00", end: "2026-10-12T00:00:00.000-04:00" }
-        ])
-      }))
-
-    it.effect("keeps 09:00 local on both sides of the DST change", () =>
-      Effect.gen(function*() {
-        const output = row({
-          id: "d",
-          title: "Daily",
-          start: [2026, 10, 30, 9, 0, 0],
-          end: [2026, 10, 30, 9, 15, 0],
-          recurrence: "FREQ=DAILY"
-        })
-        const events = yield* run(output, "2026-10-31T00:00:00-04:00", "2026-11-03T00:00:00-05:00")
-        assert.deepStrictEqual(events.map((event) => event.start), [
-          "2026-10-31T09:00:00.000-04:00",
-          "2026-11-01T09:00:00.000-05:00",
-          "2026-11-02T09:00:00.000-05:00"
-        ])
-      }))
-
-    it.effect("an edited (detached) occurrence replaces the generated one on its day", () =>
-      Effect.gen(function*() {
-        const output = weekly() + row({
-          id: "standup",
-          title: "Weekly (moved)",
-          start: [2026, 7, 6, 14, 0, 0],
-          end: [2026, 7, 6, 15, 0, 0]
-        })
-        const events = yield* run(output, JULY_6, JULY_7)
-        assert.deepStrictEqual(events.map(({ start, title }) => `${title} ${start}`), [
-          "Weekly (moved) 2026-07-06T14:00:00.000-04:00"
-        ])
-      }))
-
-    it.effect("the master's own first occurrence is reported once", () =>
-      Effect.gen(function*() {
-        const events = yield* run(weekly(), "2026-01-05T00:00:00-05:00", "2026-01-13T00:00:00-05:00")
-        assert.deepStrictEqual(events.map((event) => event.start), [
-          "2026-01-05T10:00:00.000-05:00",
-          "2026-01-12T10:00:00.000-05:00"
-        ])
-      }))
-
-    it.effect("an unsupported rule falls back to the master and drops it outside the range", () =>
-      Effect.gen(function*() {
-        const hourlyOld = row({
-          id: "h",
-          title: "Hourly",
-          start: [2026, 1, 5, 10, 0, 0],
-          end: [2026, 1, 5, 10, 15, 0],
-          recurrence: "FREQ=HOURLY"
-        })
-        const hourlyToday = row({
-          id: "h2",
-          title: "Hourly today",
-          start: [2026, 7, 6, 10, 0, 0],
-          end: [2026, 7, 6, 10, 15, 0],
-          recurrence: "FREQ=WEEKLY;BYHOUR=10,12"
-        })
-        const events = yield* run(hourlyOld + hourlyToday, JULY_6, JULY_7)
-        assert.deepStrictEqual(events.map((event) => event.id), ["h2"])
-      }))
+      const [command] = commands
+      assert.strictEqual(command?.command, HELPER)
+      assert.deepStrictEqual(command?.args, ["--list-calendars"])
+      assert.isUndefined(command?.options.shell)
+      assert.strictEqual(command?.options.stdin, "ignore")
+      assert.isDefined(command?.options.forceKillAfter)
+    }).pipe(Effect.provide(layer))
   })
 
-  it.effect("both scripts strip the record/field separators from Calendar text before emitting it", () =>
-    Effect.gen(function*() {
-      const fake = yield* makeFake(() => "")
-      yield* Calendar.use((calendar) => Effect.all([calendar.calendars, calendar.events({ from: FROM, to: TO })])).pipe(
-        Effect.provide(fake.layer)
-      )
-      const [names, events] = yield* Ref.get(fake.calls)
-      assert.include(names?.script, "AppleScript's text item delimiters to {RS, US}")
-      assert.include(names?.script, "my clean(contents of n)")
-      for (const field of ["uid of e", "summary of e", "calName", "location of e", "r"]) {
-        assert.include(events?.script, `my clean(${field})`)
-      }
+  it.effect("passes the range as ISO instants and a hostile calendar name as a single argv entry", () => {
+    const hostile = `--from "; rm -rf ~ #`
+    const { commands, layer } = withHelper(() => ({ stdout: json([]) }))
+    return Effect.gen(function*() {
+      const events = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO, calendar: hostile }))
+      assert.deepStrictEqual(events, [])
+      assert.deepStrictEqual(commands[0]?.args, ["--from", FROM, "--to", TO, "--calendar", hostile])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("omits --calendar when no calendar is given", () => {
+    const { commands, layer } = withHelper(() => ({ stdout: json([]) }))
+    return Effect.gen(function*() {
+      yield* Calendar.use((calendar) => calendar.events({ from: "2026-10-11T00:00:00-04:00", to: TO }))
+      assert.deepStrictEqual(commands[0]?.args, ["--from", FROM, "--to", TO])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("turns the helper JSON into local ISO events sorted by start, then title", () => {
+    const { layer } = withHelper(() => ({
+      stdout: json([
+        {
+          id: "b",
+          title: "Lunch",
+          calendar: "Home",
+          start: at("2026-10-11T12:00:00-04:00"),
+          end: at("2026-10-11T13:00:00-04:00"),
+          allDay: false,
+          location: "Cafe"
+        },
+        {
+          id: "c",
+          title: "Holiday",
+          calendar: "Feriados",
+          start: at("2026-10-11T00:00:00-04:00"),
+          end: at("2026-10-12T00:00:00-04:00"),
+          allDay: true
+        },
+        {
+          id: "a",
+          title: "Alpha",
+          calendar: "Work",
+          start: at("2026-10-11T12:00:00-04:00"),
+          end: at("2026-10-11T12:30:00-04:00"),
+          allDay: false,
+          location: ""
+        }
+      ])
     }))
+    return Effect.gen(function*() {
+      const events = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO }))
+      assert.deepStrictEqual(events, [
+        {
+          id: "c",
+          title: "Holiday",
+          calendar: "Feriados",
+          start: "2026-10-11T00:00:00.000-04:00",
+          end: "2026-10-12T00:00:00.000-04:00",
+          allDay: true
+        },
+        {
+          id: "a",
+          title: "Alpha",
+          calendar: "Work",
+          start: "2026-10-11T12:00:00.000-04:00",
+          end: "2026-10-11T12:30:00.000-04:00",
+          allDay: false
+        },
+        {
+          id: "b",
+          title: "Lunch",
+          calendar: "Home",
+          start: "2026-10-11T12:00:00.000-04:00",
+          end: "2026-10-11T13:00:00.000-04:00",
+          allDay: false,
+          location: "Cafe"
+        }
+      ])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("keeps occurrences of a recurring series (same id) and drops anything outside the range", () => {
+    const { layer } = withHelper(() => ({
+      stdout: json([
+        { id: "s", title: "Standup", calendar: "W", start: at(FROM), end: at(FROM) + 900_000, allDay: false },
+        { id: "s", title: "Standup", calendar: "W", start: at(TO) - 900_000, end: at(TO), allDay: false },
+        { id: "x", title: "Ended", calendar: "W", start: at(FROM) - 3_600_000, end: at(FROM), allDay: false }
+      ])
+    }))
+    return Effect.gen(function*() {
+      const events = yield* Calendar.use((calendar) => calendar.events({ from: FROM, to: TO }))
+      assert.deepStrictEqual(events.map(({ id, start }) => `${id} ${start}`), [
+        "s 2026-10-11T00:00:00.000-04:00",
+        "s 2026-10-11T23:45:00.000-04:00"
+      ])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("today asks for the local day", () => {
+    const { commands, layer } = withHelper(() => ({ stdout: json([]) }))
+    return Effect.gen(function*() {
+      yield* TestClock.setTime(at("2026-10-11T15:30:00-04:00"))
+      yield* Calendar.use((calendar) => calendar.today)
+      assert.deepStrictEqual(commands[0]?.args, ["--from", FROM, "--to", TO])
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("reports a denied permission with a hint", () => {
+    const { layer } = withHelper(() => ({ exitCode: 3, stderr: "calendar access denied\n" }))
+    return Effect.gen(function*() {
+      const error = yield* Effect.flip(Calendar.use((calendar) => calendar.today))
+      assert.instanceOf(error, AutomationError)
+      assert.include(error.message, "denied Calendar access")
+      assert.include(error.message, "Privacy & Security > Calendars")
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("tells write-only access apart from a denial", () => {
+    const { layer } = withHelper(() => ({ exitCode: 3, stderr: "calendar access is write-only\n" }))
+    return Effect.gen(function*() {
+      const error = yield* Effect.flip(Calendar.use((calendar) => calendar.calendars))
+      assert.include(error.message, "Add Events Only")
+      assert.include(error.message, "Full Access")
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("reports an unknown calendar", () => {
+    const { layer } = withHelper(() => ({ exitCode: 4, stderr: "calendar not found\n" }))
+    return Effect.gen(function*() {
+      const error = yield* Effect.flip(
+        Calendar.use((calendar) => calendar.events({ from: FROM, to: TO, calendar: "Nope" }))
+      )
+      assert.strictEqual(error.message, "Calendar not found: Nope")
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("rejects malformed helper output", () => {
+    const { layer } = withHelper(() => ({ stdout: `{"events":[{"id":1}]}` }))
+    return Effect.gen(function*() {
+      const error = yield* Effect.flip(Calendar.use((calendar) => calendar.events({ from: FROM, to: TO })))
+      assert.include(error.message, "Unexpected Calendar output")
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("validates the range before spawning anything", () => {
+    const { commands, layer } = withHelper(() => ({ stdout: json([]) }))
+    return Effect.gen(function*() {
+      const backwards = yield* Effect.flip(Calendar.use((calendar) => calendar.events({ from: TO, to: FROM })))
+      assert.include(backwards.message, "after")
+      const tooLong = yield* Effect.flip(
+        Calendar.use((calendar) => calendar.events({ from: FROM, to: "2026-12-01T00:00:00Z" }))
+      )
+      assert.include(tooLong.message, "31 days")
+      const garbage = yield* Effect.flip(Calendar.use((calendar) => calendar.events({ from: "soon", to: TO })))
+      assert.include(garbage.message, "ISO 8601")
+      assert.strictEqual(commands.length, 0)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("gives up on a stuck helper after 10 s", () => {
+    const { layer } = withHelper(() => ({ hang: true }))
+    return Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(Effect.flip(Calendar.use((calendar) => calendar.today)))
+      yield* TestClock.adjust(Duration.seconds(9))
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* TestClock.adjust(Duration.seconds(1))
+      const error = yield* Fiber.join(fiber)
+      assert.include(error.message, "did not finish within 10s")
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("refuses a relative helper path", () =>
+    Effect.gen(function*() {
+      const layer = Calendar.layerWithoutHelper.pipe(
+        Layer.provide(CalendarHelper.layerAt("calendar-events")),
+        Layer.provide(fakeSpawner().spawner)
+      )
+      const error = yield* Effect.flip(Calendar.use((calendar) => calendar.calendars).pipe(Effect.provide(layer)))
+      assert.include(error.message, "absolute")
+    }))
+})
+
+describe("buildHelper", () => {
+  it.effect("compiles once with swiftc + codesign into the cache directory, then reuses the binary", () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvis-bin-"))
+    const previous = process.env["JARVIS_BIN_DIR"]
+    process.env["JARVIS_BIN_DIR"] = directory
+    const fake = fakeSpawner((command) => {
+      const output = command.args[command.args.indexOf("-o") + 1]
+      if (command.command === "/usr/bin/swiftc" && output !== undefined) writeFileSync(output, "binary")
+      return {}
+    })
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const first = yield* buildHelper(spawner)
+      const second = yield* buildHelper(spawner)
+      assert.strictEqual(first, second)
+      assert.match(first, /\/calendar-events-[0-9a-f]{12}$/)
+      assert.deepStrictEqual(readdirSync(directory), [first.slice(directory.length + 1)])
+      assert.deepStrictEqual(fake.commands.map((command) => command.command), ["/usr/bin/swiftc", "/usr/bin/codesign"])
+      assert.include(fake.commands[0]?.args, "__info_plist")
+    }).pipe(
+      Effect.provide(fake.spawner),
+      Effect.ensuring(Effect.sync(() => {
+        if (previous === undefined) delete process.env["JARVIS_BIN_DIR"]
+        else process.env["JARVIS_BIN_DIR"] = previous
+        rmSync(directory, { recursive: true, force: true })
+      }))
+    )
+  })
+
+  it.effect("cleans up and explains a failed build", () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvis-bin-"))
+    const previous = process.env["JARVIS_BIN_DIR"]
+    process.env["JARVIS_BIN_DIR"] = directory
+    const fake = fakeSpawner(() => ({ exitCode: 1, stderr: "xcrun: error: invalid active developer path" }))
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const error = yield* Effect.flip(buildHelper(spawner))
+      assert.include(error.message, "Command Line Tools")
+      assert.deepStrictEqual(readdirSync(directory), [])
+    }).pipe(
+      Effect.provide(fake.spawner),
+      Effect.ensuring(Effect.sync(() => {
+        if (previous === undefined) delete process.env["JARVIS_BIN_DIR"]
+        else process.env["JARVIS_BIN_DIR"] = previous
+        rmSync(directory, { recursive: true, force: true })
+      }))
+    )
+  })
+})
+
+// Reads the real Calendar (never writes). Opt in with JARVIS_CALENDAR_LIVE=1;
+// the process running the tests needs Full Access in Privacy & Security > Calendars.
+describe.runIf(process.env["JARVIS_CALENDAR_LIVE"] === "1")("Calendar (live, read-only)", () => {
+  it.live("lists calendars and reads the next 7 days through EventKit", () =>
+    Effect.gen(function*() {
+      const calendar = yield* Calendar
+      const names = yield* calendar.calendars
+      assert.isAbove(names.length, 0)
+      const today = yield* calendar.today
+      const from = new Date()
+      const to = new Date(from.getTime() + 7 * 24 * 60 * 60 * 1000)
+      const week = yield* calendar.events({ from: from.toISOString(), to: to.toISOString() })
+      for (const event of [...today, ...week]) assert.isBelow(Date.parse(event.start), Date.parse(event.end) + 1)
+    }).pipe(Effect.provide(Calendar.layer.pipe(Layer.provide(BunServices.layer)))), { timeout: 180_000 })
 })
