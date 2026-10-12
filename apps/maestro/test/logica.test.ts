@@ -8,7 +8,8 @@ import { decidir } from "../src/entrega.ts"
 import { formatarEntrega, limparOrigem } from "../src/fila.ts"
 import { atualizarAuto, AUTO_FIM, AUTO_INICIO, ehMaestro, ehSessaoDoMaestro, renderizar, resumirTranscript } from "../src/memoria.ts"
 import { devidas, type Rotina } from "../src/rotinas.ts"
-import { AgentesJson, alvoEspecialista, argsClaude, hooksSettings, REPO } from "../src/vigia.ts"
+import { deveRetomar, promptRetomada } from "../src/retomada.ts"
+import { AgentesJson, alvoEspecialista, alvoMaestro, argsClaude, hooksSettings, REPO } from "../src/vigia.ts"
 import { readFileSync } from "node:fs"
 import { Schema } from "effect"
 
@@ -168,5 +169,32 @@ describe("hooks dos agentes do vigia", () => {
     expect(hooks.SessionStart[0]!.matcher).toBe("startup|resume|compact|clear")
     expect(hooks.SessionStart[0]!.hooks[0]!.command).toBe(`/bun ${REPO}/apps/maestro/src/hooks/session-start.ts`)
     expect(hooks.PreCompact[0]!.hooks[0]!.command).toBe(`/bun ${REPO}/apps/maestro/src/hooks/pre-compact.ts`)
+  })
+})
+
+describe("retomada do papel", () => {
+  const config = { name: "maestro", dir: "/tmp/m", workspace: "maestro", herdr: "h", fala: "/bin/fala", port: 1, settings: "" }
+  it("o prompt do especialista traz papel, missão, estado e sistema", () => {
+    const alvo = alvoEspecialista(config, { nome: "telemetria", papel: "dono do coletor", prompt: "Mantenha o Grafana." })
+    const texto = promptRetomada(alvo)
+    expect(texto).toContain("[retomada: telemetria]")
+    expect(texto).toContain("Papel: dono do coletor.")
+    expect(texto).toContain("Mantenha o Grafana.")
+    expect(texto).toContain("/tmp/m/agentes/telemetria/estado.md")
+    expect(texto).toContain("/tmp/m/agentes/telemetria/sistema.md")
+    expect(promptRetomada(alvo)).toBe(texto)
+  })
+  it("o maestro retoma pelo sistema.md", () => {
+    const texto = promptRetomada(alvoMaestro(config))
+    expect(texto).toContain("[retomada: maestro]")
+    expect(texto).toContain("/tmp/m/sistema.md")
+    expect(texto).not.toContain("Missão")
+  })
+  it("só manda com o agente parado, nunca trabalhando ou bloqueado", () => {
+    expect(deveRetomar(Option.some("idle"))).toBe(true)
+    expect(deveRetomar(Option.some("done"))).toBe(true)
+    expect(deveRetomar(Option.some("working"))).toBe(false)
+    expect(deveRetomar(Option.some("blocked"))).toBe(false)
+    expect(deveRetomar(Option.none())).toBe(false)
   })
 })

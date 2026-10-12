@@ -8,6 +8,7 @@ import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { Cause, Effect, Layer, Logger, Option } from "effect"
 import { MaestroConfig } from "./config.ts"
 import { Herdr } from "./herdr.ts"
+import { retomarRecriados } from "./retomada.ts"
 import { vigiar } from "./vigia.ts"
 
 const main = Effect.gen(function*() {
@@ -21,6 +22,8 @@ const main = Effect.gen(function*() {
       yield* Effect.logWarning(`Agente ${resultado.nome} não subiu: ${resultado.erro}`)
     }
   }
+  // O --resume só reabre a conversa: sem este prompt o agente fica idle para sempre.
+  yield* retomarRecriados(config, resultados).pipe(Effect.provide(Herdr.layer(config.herdr)))
 })
 
 Effect.sync(() => process.umask(0o077)).pipe(
