@@ -11,9 +11,12 @@ workspace = true
 
 [dependencies]
 jarvis-protocolo.workspace = true
-anyhow.workspace = true
-clap.workspace = true
-tokio.workspace = true
+serde_json.workspace = true
+signal-hook = "0.4"
+
+[dev-dependencies]
+assert_cmd = "2"
+tempfile = "3"
 
 [[bin]]
 name = "jarvis-fala-rs"
