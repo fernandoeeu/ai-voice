@@ -28,3 +28,44 @@ fn reconstruir_com_produtor_em_backpressure_nao_trava() {
         "DEADLOCK: reconstruir preso esperando o produtor (stream parado)"
     );
 }
+
+#[test]
+fn calar_durante_backpressure_nao_vaza_resto_da_frase() {
+    let f = Arc::new(FakeSaida::novo(24_000));
+    let p = f.clone();
+    let prod = std::thread::spawn(move || p.tocar(FalaId(1), tom(24_000 * 5), true));
+    std::thread::sleep(Duration::from_millis(200));
+    f.avancar(2_400);
+    std::thread::sleep(Duration::from_millis(20));
+    f.calar(30);
+    std::thread::sleep(Duration::from_millis(50));
+    let n0 = f.gravado().len();
+    for _ in 0..100 {
+        f.avancar(2_400);
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let g = f.gravado();
+    let vazou = g[n0..].iter().filter(|v| v.abs() > 0.01).count();
+    let _ = prod.join();
+    assert_eq!(
+        vazou, 0,
+        "{vazou} amostras da fala calada tocaram depois do calar"
+    );
+}
+
+#[test]
+fn bloco_seguinte_de_fala_calada_e_descartado() {
+    let f = FakeSaida::novo(24_000);
+    f.tocar(FalaId(1), tom(2_400), false);
+    f.avancar(1_200);
+    f.calar(10);
+    assert_eq!(f.pendentes(), 0);
+    // o sintetizador ainda manda o resto da fala calada: nada pode tocar
+    f.tocar(FalaId(1), tom(2_400), true);
+    assert_eq!(f.pendentes(), 0);
+    let g = f.avancar(4_800);
+    assert!(g.iter().all(|v| *v == 0.0));
+    // uma fala nova toca normalmente
+    f.tocar(FalaId(2), tom(2_400), true);
+    assert_eq!(f.pendentes(), 2_400);
+}

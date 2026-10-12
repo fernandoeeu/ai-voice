@@ -70,6 +70,10 @@ pub struct Produtor {
     escritas: u64,
     taxa: u32,
     fala_vista: Option<FalaId>,
+    /// `pedidos` quando a `fala_vista` comecou: se mudou, a fala foi calada.
+    geracao_vista: u64,
+    /// Fala calada no meio: blocos seguintes dela sao descartados.
+    calada: Option<FalaId>,
     reamostrador: Option<Reamostrador>,
     ctl: Arc<Controle>,
 }
@@ -110,6 +114,8 @@ impl Nucleo {
                 escritas: 0,
                 taxa,
                 fala_vista: None,
+                geracao_vista: 0,
+                calada: None,
                 reamostrador: None,
                 ctl: ctl.clone(),
             }),
@@ -138,6 +144,8 @@ impl Nucleo {
 
     /// Enfileira um bloco. Bloqueia (backpressure) se o buffer estiver cheio;
     /// desiste se um `calar` chegar no meio. Retorna `false` se desistiu.
+    /// Uma fala calada nao empurra mais nada: nem o resto do bloco em curso,
+    /// nem blocos seguintes dela.
     ///
     /// O lock do produtor e tomado por passo (um pedaco por vez) e solto a cada
     /// espera: `reconstruir` nunca fica preso atras de um produtor em
@@ -161,12 +169,32 @@ impl Nucleo {
                     i = 0;
                     taxa = p.taxa;
                 }
-                if let Some(ok) = p.passo(fala, &saida, &mut i, ultimo, pedidos_ini) {
-                    return ok;
+                match p.passo(fala, &saida, &mut i, ultimo, pedidos_ini) {
+                    Passo::Esperar => {}
+                    Passo::Acabou(ok) => return ok,
+                    Passo::Purgar => {
+                        // ainda com o lock do produtor: ninguem empurra no meio
+                        self.purgar();
+                        return false;
+                    }
                 }
             }
             std::thread::sleep(Duration::from_millis(1));
         }
+    }
+
+    /// Um `calar` chegou enquanto o passo empurrava: o `descartar` do calar
+    /// pode ter rodado antes do push. Espera o calar concluir e descarta de novo.
+    fn purgar(&self) {
+        let alvo = self.ctl.pedidos.load(Acquire);
+        let limite = Instant::now() + Duration::from_millis(300);
+        while self.ctl.feitos.load(Acquire) < alvo && Instant::now() < limite {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        if let Ok(mut c) = self.consumidor.lock() {
+            c.descartar();
+        }
+        self.ctl.feitos.fetch_max(alvo, Release);
     }
 
     /// Pede `calar` e espera o callback concluir o fade e limpar o buffer.
@@ -240,6 +268,14 @@ impl Nucleo {
     }
 }
 
+enum Passo {
+    /// Falta espaco: solta o lock e tenta de novo.
+    Esperar,
+    Acabou(bool),
+    /// Calado durante o push: descartar o que foi empurrado.
+    Purgar,
+}
+
 impl Produtor {
     fn limite(&self) -> usize {
         ((self.taxa * SEGUNDOS_BUFFER) as usize).min(CAPACIDADE)
@@ -265,8 +301,8 @@ impl Produtor {
     }
 
     /// Um passo do enfileiramento, com o lock tomado: marca de inicio, o
-    /// quanto couber de `saida[*i..]` e, no fim, a marca de fim. `None` = falta
-    /// espaco (quem chama solta o lock e tenta de novo); `Some(ok)` = acabou.
+    /// quanto couber de `saida[*i..]` e, no fim, a marca de fim. O `calar` e
+    /// conferido antes e depois de empurrar.
     fn passo(
         &mut self,
         fala: FalaId,
@@ -274,9 +310,14 @@ impl Produtor {
         i: &mut usize,
         ultimo: bool,
         pedidos_ini: u64,
-    ) -> Option<bool> {
-        if self.ctl.pedidos.load(Acquire) != pedidos_ini {
-            return Some(false);
+    ) -> Passo {
+        let atual = self.ctl.pedidos.load(Acquire);
+        if self.calada.is_some_and(|c| c != fala) {
+            self.calada = None;
+        }
+        let calada_antes = self.fala_vista == Some(fala) && self.geracao_vista != atual;
+        if atual != pedidos_ini || calada_antes || self.calada == Some(fala) {
+            return self.desistir(fala);
         }
         if !saida.is_empty() && self.fala_vista != Some(fala) {
             let m = Marca {
@@ -284,8 +325,11 @@ impl Produtor {
                 fala,
                 tipo: TipoMarca::Inicio,
             };
-            self.marcas.push(m).ok()?;
+            if self.marcas.push(m).is_err() {
+                return Passo::Esperar;
+            }
             self.fala_vista = Some(fala);
+            self.geracao_vista = pedidos_ini;
         }
         let ocupado = CAPACIDADE - self.amostras.slots();
         let livre = self.limite().saturating_sub(ocupado);
@@ -298,19 +342,35 @@ impl Produtor {
             self.escritas += n as u64;
             self.ctl.escritas.store(self.escritas, Release);
         }
-        if *i < saida.len() {
-            return None;
-        }
-        if ultimo {
+        let mut fim = *i == saida.len();
+        if fim && ultimo {
             let m = Marca {
                 pos: self.escritas,
                 fala,
                 tipo: TipoMarca::Fim,
             };
-            self.marcas.push(m).ok()?;
+            fim = self.marcas.push(m).is_ok();
+            if fim {
+                self.fala_vista = None;
+            }
+        }
+        if self.ctl.pedidos.load(Acquire) != pedidos_ini {
+            self.desistir(fala);
+            return Passo::Purgar;
+        }
+        if fim {
+            Passo::Acabou(true)
+        } else {
+            Passo::Esperar
+        }
+    }
+
+    fn desistir(&mut self, fala: FalaId) -> Passo {
+        self.calada = Some(fala);
+        if self.fala_vista == Some(fala) {
             self.fala_vista = None;
         }
-        Some(true)
+        Passo::Acabou(false)
     }
 }
 
