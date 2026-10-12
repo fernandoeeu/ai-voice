@@ -26,6 +26,40 @@ Mac tools, available **only over stdio** (the HTTP endpoint has no authenticatio
 > [!IMPORTANT]
 > Jarvis is an unofficial, community project. It is not affiliated with or endorsed by Amazon, and it relies on the private APIs the Alexa app uses, through [`alexa-remote2`](https://github.com/Apollon77/alexa-remote). Amazon can change those APIs at any time. Read [How the Alexa integration works](docs/alexa-integration.md) before trusting it with your account.
 
+## Install on a Mac (one command)
+
+On macOS, one script installs and wires everything for the current user. It is idempotent: run it again after a `git pull` to update. Until the Jarvis pull request is merged, check it out after cloning with `gh pr checkout <number>`.
+
+```sh
+git clone https://github.com/henriquearthur/ai-voice.git jarvis
+cd jarvis
+./scripts/setup.sh --dry-run   # shows what it would do, changes nothing
+./scripts/setup.sh
+```
+
+It checks the prerequisites and says what is missing, runs `bun install`, then installs:
+
+| Piece | Where | What it does |
+| --- | --- | --- |
+| Local voice server (Kokoro) | `~/.local/share/jarvis/tts`, LaunchAgent `dev.jarvis.tts` on `127.0.0.1:7349` | Natural pt-BR speech on the Mac with [Kokoro-82M](https://huggingface.co/mlx-community/Kokoro-82M-bf16) through `mlx-audio`. Creates a Python 3.12 venv from `services/tts/requirements.lock.txt` and downloads the model with only the pt-BR voices (about 330 MB). Apple Silicon only; without it the Mac speaks with `say`. |
+| Speech commands | `~/.local/bin/jarvis-fala`, `jarvis-fala-resposta`, `jarvis-avisa`, `jarvis-mcp-stdio` | `jarvis-fala "text"` speaks on the Mac, one speech at a time. The other two are optional Claude Code hooks. `jarvis-mcp-stdio` starts the MCP server and reads the Grok Bot secrets from the Keychain. |
+| Dashboard | LaunchAgent `dev.jarvis.dashboard` on `http://127.0.0.1:7350` | Production build of `apps/dashboard`, kept running. |
+| Voice listening (Escuta) | `~/.local/share/jarvis/bin/Escuta.app`, LaunchAgent `dev.jarvis.escuta` | Menu bar app that listens for "Jarvis", transcribes on the device and hands the request to an agent session running in herdr. Needs macOS 26 and herdr; skipped when herdr is missing. |
+| MCP server in Claude Code | `claude mcp add ai-voice -s user` | Registered only if the `claude` CLI exists and `ai-voice` is not registered yet. |
+
+Everything optional is off by default:
+
+| Flag | Adds |
+| --- | --- |
+| `--com-echo` | The Amazon Echo: asks for your marketplace and default Echo, then tells you how to sign in. |
+| `--com-grok` | The Grok Bot callback server (`dev.jarvis.callback` on `127.0.0.1:7348`). Secrets go to the Keychain and public exposure goes through Tailscale Funnel, both by hand. |
+| `--sem-voz`, `--sem-dashboard`, `--sem-escuta`, `--sem-mcp` | Skip that piece. `--com-escuta` installs Escuta even without herdr. |
+| `--sim` | Asks nothing; uses the config file, the environment and the defaults. |
+
+Your answers are kept in `~/.config/jarvis/jarvis.env` (no secrets there), which the dashboard and Escuta installers also read. At the end the script prints what is left to do by hand: macOS permissions (Calendars, Reminders, Automation, and Microphone and Speech Recognition for Escuta), the Amazon sign-in if you want the Echo, and the Keychain and Funnel steps if you want the Grok Bot. See [Mac setup](docs/setup.md) for every file it writes, the hooks and how to uninstall.
+
+The sections below set up the MCP server by hand, for other clients or other operating systems.
+
 ## Layout
 
 This is a Bun workspace managed by Turborepo.
@@ -35,8 +69,13 @@ This is a Bun workspace managed by Turborepo.
 | `packages/alexa` | `@jarvis/alexa` | Alexa session, devices, speech and login, built on Effect v4. |
 | `packages/apple` | `@jarvis/apple` | Reminders, Calendar, Maps and Phone on the Mac, through `osascript` and `open`. Effect v4. |
 | `packages/grokbot` | `@jarvis/grokbot` | In progress. Send-only and at-most-once: it sends a message and has no result channel. |
+| `packages/voice` | `@jarvis/voice` | Speech on the Mac: the local TTS server first, `say` as fallback, serialized with a lock shared with `jarvis-fala`. |
+| `packages/announce` | `@jarvis/announce` | Turns agent events into short, safe pt-BR announcements. |
 | `apps/mcp` | `@jarvis/mcp` | The MCP server (bin `jarvis-voice`: stdio and Streamable HTTP on `/mcp`) and the `login` and `devices` commands. Built on Effect v4. |
 | `apps/dashboard` | `@jarvis/dashboard` | SvelteKit dashboard: `/` (Alexa), `/lembretes`, `/agenda` and `/ir`. |
+| `apps/escuta` | Swift package | Always-on voice listening in the menu bar (macOS 26+). |
+| `services/tts` | Python | The Kokoro voice server, its lock file and installer, and the `fala-kokoro.sh` client. |
+| `services/bin`, `services/launchd` | Shell | The `~/.local/bin` commands and the LaunchAgent templates that `scripts/setup.sh` installs. |
 
 Environment variables keep the `AI_VOICE_*` names from the original project.
 
@@ -44,7 +83,8 @@ Environment variables keep the `AI_VOICE_*` names from the original project.
 
 - [Bun](https://bun.sh) 1.3 or newer. The exact version is pinned in `packageManager` in `package.json`.
 - macOS. The Mac tools and the dashboard's Reminders, Agenda and Ir pages need it, and macOS asks for Automation permission the first time.
-- An Amazon account with at least one Echo device.
+- For `scripts/setup.sh`: Xcode Command Line Tools (`xcode-select --install`), and [uv](https://docs.astral.sh/uv/) or Python 3.12 for the voice server on Apple Silicon. Escuta needs macOS 26 and herdr.
+- For the Echo only: an Amazon account with at least one Echo device.
 - The machine running Jarvis must be on and online while agents use it.
 
 ## Quick start
@@ -157,6 +197,7 @@ Pages: `/` sends speech to an Echo, `/lembretes` lists and creates reminders, `/
 - [Configuration reference](docs/configuration.md): every environment variable, the tool contracts, and troubleshooting.
 - [Serve Jarvis over the network](docs/network.md): run it once on a home server and use it from every machine.
 - [How the Alexa integration works](docs/alexa-integration.md): the private APIs involved, what was validated, security and known limits.
+- [Mac setup](docs/setup.md): what `scripts/setup.sh` installs, the files it writes, the optional parts and how to uninstall.
 
 ## Development
 
