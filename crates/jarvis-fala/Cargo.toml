@@ -14,5 +14,9 @@ jarvis-protocolo.workspace = true
 jarvis-kokoro.workspace = true
 jarvis-audio.workspace = true
 jarvis-lock.workspace = true
-tokio.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["process"] }
 tracing.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
