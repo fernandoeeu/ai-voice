@@ -25,7 +25,7 @@ CONFIG="${JARVIS_CONFIG:-$HOME/.config/jarvis/jarvis.env}"
 # Motor de reconhecimento: apple (padrão) ou parakeet (NVIDIA Parakeet TDT v3 local + VAD Silero).
 STT="${ESCUTA_STT:-apple}"
 # Com o Parakeet a VAD mede o silêncio e o texto final sai na hora: fecha a fala mais cedo.
-if [ "$STT" = "parakeet" ]; then SILENCIO_PADRAO=0.7; else SILENCIO_PADRAO=1.3; fi
+if [ "$STT" = "parakeet" ]; then SILENCIO_PADRAO=1.0; else SILENCIO_PADRAO=1.3; fi
 SILENCIO="${ESCUTA_SILENCIO:-$SILENCIO_PADRAO}"
 xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
