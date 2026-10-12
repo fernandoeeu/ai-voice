@@ -5,15 +5,21 @@
 //! script legado (`fala-kokoro.sh`) com o mesmo texto e voz.
 
 use std::io::{BufRead, BufReader, Read, Write};
+use std::net::Shutdown;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, exit};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use jarvis_protocolo::{CodigoErro, Escopo, Esperar, Evento, Mensagem, Op, Requisicao, codificar, decodificar, rc};
+use jarvis_protocolo::{CodigoErro, Esperar, Evento, Mensagem, Op, Requisicao, codificar, decodificar, rc};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
+
+/// Marcado antes do shutdown do socket, para a thread principal (que ve o EOF
+/// primeiro) sair com 143 em vez de tratar como erro/fallback.
+static INTERROMPIDO: AtomicBool = AtomicBool::new(false);
 
 const PRAZO_ACEITO: Duration = Duration::from_millis(50);
 
@@ -103,14 +109,13 @@ fn main() {
     let _ = stream.set_write_timeout(None);
     let _ = stream.set_read_timeout(Some(PRAZO_ACEITO));
 
-    // SIGTERM/SIGINT: manda `calar` da fala e sai com 143.
-    if let (Ok(mut sinais), Ok(mut escrita)) = (Signals::new([SIGTERM, SIGINT]), stream.try_clone()) {
+    // SIGTERM/SIGINT: so fecha a conexao e sai com 143; o daemon cancela a
+    // fala deste cliente (`cancelar_ao_desconectar`), sem tocar nas dos outros.
+    if let (Ok(mut sinais), Ok(escrita)) = (Signals::new([SIGTERM, SIGINT]), stream.try_clone()) {
         std::thread::spawn(move || {
             if sinais.forever().next().is_some() {
-                if let Ok(l) = codificar(&Requisicao::nova("cli-calar", Op::Calar { escopo: Escopo::Atual })) {
-                    let _ = escrita.write_all(l.as_bytes());
-                    let _ = escrita.flush();
-                }
+                INTERROMPIDO.store(true, Ordering::SeqCst);
+                let _ = escrita.shutdown(Shutdown::Both);
                 exit(rc::INTERROMPIDA);
             }
         });
@@ -121,7 +126,11 @@ fn main() {
     let mut buf = String::new();
     loop {
         buf.clear();
-        match leitor.read_line(&mut buf) {
+        let lido = leitor.read_line(&mut buf);
+        if INTERROMPIDO.load(Ordering::SeqCst) && !matches!(lido, Ok(n) if n > 0) {
+            exit(rc::INTERROMPIDA);
+        }
+        match lido {
             Ok(0) => {
                 if !aceito {
                     fallback(&texto, voz.as_deref());

@@ -110,7 +110,7 @@ fn primeiro_som_e_verboso() {
 }
 
 #[test]
-fn sigterm_manda_calar() {
+fn sigterm_so_fecha_a_conexao() {
     let d = TempDir::new().unwrap();
     let (rx, sock) = servidor(d.path(), vec![aceito()]);
     let mut filho = std::process::Command::new(assert_cmd::cargo::cargo_bin("jarvis-fala-rs"))
@@ -124,8 +124,8 @@ fn sigterm_manda_calar() {
     enviar_sigterm(filho.id());
     let status = filho.wait().unwrap();
     assert_eq!(status.code(), Some(143));
-    let calar = rx.recv_timeout(Duration::from_secs(5)).unwrap();
-    assert_eq!(calar["op"], "calar");
+    // O servidor falso ve EOF (o canal fecha) e nunca recebe `calar`.
+    assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Err(mpsc::RecvTimeoutError::Disconnected));
 }
 
 fn enviar_sigterm(pid: u32) {
