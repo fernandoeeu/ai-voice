@@ -101,13 +101,20 @@ describe('executar', () => {
 		await h.run(executar('w:p2', acao));
 		expect(h.chamadas.at(-1)).toEqual(['pane', 'send-keys', 'w:p2', tecla]);
 	});
-	test('steer manda o texto literal (mesmo começando com -) e ctrl+enter', async () => {
+	test('steer manda o texto e ctrl+enter', async () => {
 		const h = mock();
-		await h.run(executar('w:p1', 'steer', ' --help; rm -rf / '));
+		await h.run(executar('w:p1', 'steer', '  texto normal; a-b '));
 		expect(h.chamadas.slice(1)).toEqual([
-			['pane', 'send-text', 'w:p1', '--help; rm -rf /'],
+			['pane', 'send-text', 'w:p1', 'texto normal; a-b'],
 			['pane', 'send-keys', 'w:p1', 'ctrl+enter']
 		]);
+	});
+	test.each(['--help', '-x', '  --help; rm -rf /', '-'])('steer rejeita texto que começa com "-": %s', async (texto) => {
+		const h = mock();
+		const erro = await h.run(executar('w:p1', 'steer', texto).pipe(Effect.flip));
+		expect(erro.motivo).toBe('texto');
+		expect(erro.message).toContain('não pode começar com "-"');
+		expect(h.chamadas).toEqual([['agent', 'list']]);
 	});
 	test('pane que não é agente vivo é recusado sem escrever nada', async () => {
 		const h = mock();

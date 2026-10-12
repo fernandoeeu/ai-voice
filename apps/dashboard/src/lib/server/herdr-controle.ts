@@ -126,6 +126,9 @@ export const executar = (pane: string, acao: Acao, entrada?: unknown): Effect.Ef
 		if (acao === 'steer') {
 			const valido = validarTexto(entrada);
 			if (!valido.ok) return yield* new HerdrErro({ motivo: 'texto', message: valido.motivo });
+			// O texto vai como argumento posicional do CLI (que não aceita `--`): um `-` inicial viraria flag.
+			if (valido.texto.startsWith('-'))
+				return yield* new HerdrErro({ motivo: 'texto', message: 'O texto não pode começar com "-". Comece com uma letra ou outro caractere.' });
 			const cli = yield* HerdrCli;
 			yield* cli.run(['pane', 'send-text', alvo.pane, valido.texto]);
 		}
