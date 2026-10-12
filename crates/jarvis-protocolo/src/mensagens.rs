@@ -33,6 +33,10 @@ pub enum Op {
         esperar: Esperar,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         prazo_fila_s: Option<u32>,
+        /// Se `true`, o daemon cancela a fala quando a conexao cai. Com
+        /// `esperar == aceito` isso vale so ate o `aceito` ser enviado: depois
+        /// dele a fala fica desacoplada da conexao e termina sozinha. Com
+        /// `primeiro_som` ou `fim` vale ate o fim da fala. Padrao: `false`.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cancelar_ao_desconectar: Option<bool>,
     },

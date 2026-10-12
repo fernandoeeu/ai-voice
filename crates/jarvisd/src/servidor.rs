@@ -273,8 +273,17 @@ async fn falar(
         Err(e) => return erro(&tx, id, e.to_string()),
     };
     let mut cancelado = false;
+    // Com `esperar == aceito`, o cancelamento por desconexao vale so ate o `aceito`.
+    let mut desacoplada = false;
     loop {
         tokio::select! {
+            // Desconexao antes do `aceito` vence um evento pronto: nada foi aceito ainda.
+            biased;
+            _ = desc.changed(), if cancelar && !cancelado && !desacoplada => {
+                cancelado = true;
+                tracing::info!(fala = fala.0, "cliente desconectou: cancelando");
+                let _ = ctx.fila.cancelar(fala).await;
+            }
             ev = rx.recv() => {
                 let Some(ev) = ev else { break };
                 if let Evento::PrimeiroSom { fala, ms } = &ev {
@@ -288,18 +297,16 @@ async fn falar(
                     Evento::Fim { .. } => esperar == Esperar::Fim,
                     _ => false,
                 };
+                let aceito = matches!(ev, Evento::Aceito { .. });
                 if encaminha {
                     enviar(&tx, id, ev);
+                }
+                if aceito && esperar == Esperar::Aceito {
+                    desacoplada = true;
                 }
                 if fim {
                     break;
                 }
-            }
-            // Conexao caiu (ou o Sender sumiu): cancela a fala, mesmo que ja esteja tocando.
-            _ = desc.changed(), if cancelar && !cancelado => {
-                cancelado = true;
-                tracing::info!(fala = fala.0, "cliente desconectou: cancelando");
-                let _ = ctx.fila.cancelar(fala).await;
             }
         }
     }

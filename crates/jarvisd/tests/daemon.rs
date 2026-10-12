@@ -360,6 +360,42 @@ fn sem_a_flag_a_fala_sobrevive_a_desconexao() {
 }
 
 #[test]
+fn sem_esperar_desconecta_apos_aceito_fala_continua() {
+    let d = Daemon::subir(1.0);
+    let mut obs = d.cliente();
+    obs.enviar(&json!({"v":1,"id":"s","op":"assinar"}));
+    obs.ler();
+    let mut c = d.cliente();
+    c.falar(
+        "f",
+        "segue falando",
+        json!({"esperar": "aceito", "cancelar_ao_desconectar": true}),
+    );
+    c.ate("aceito");
+    drop(c);
+    assert_eq!(obs.ate("fim").last().unwrap()["rc"], 0);
+}
+
+#[test]
+fn sem_esperar_desconecta_antes_do_aceito_cancela() {
+    let d = Daemon::subir(3.0);
+    let mut obs = d.cliente();
+    obs.enviar(&json!({"v":1,"id":"s","op":"assinar"}));
+    obs.ler();
+    let mut c = d.cliente();
+    c.falar(
+        "f",
+        "cancelada",
+        json!({"esperar": "aceito", "cancelar_ao_desconectar": true}),
+    );
+    drop(c);
+    let t = Instant::now();
+    let v = obs.ate("fim");
+    assert_eq!(v.last().unwrap()["rc"], 143, "{v:?}");
+    assert!(t.elapsed() < Duration::from_secs(2), "cancelamento demorou");
+}
+
+#[test]
 fn estado_reflete_a_fila() {
     let d = Daemon::subir(1.0);
     let mut c = d.cliente();
