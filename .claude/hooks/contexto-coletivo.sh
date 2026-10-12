@@ -41,8 +41,8 @@ quadro() {
     out="$(bun "$ROOT/packages/quadro/bin/quadro.ts" resumo 2>/dev/null)" || out=""
   fi
   if [ -z "$out" ] && [ -f "$JARVIS/quadro.db" ] && command -v sqlite3 >/dev/null 2>&1; then
-    out="$(sqlite3 "$JARVIS/quadro.db" "select status||': '||count(*) from tarefas group by status;" 2>/dev/null)" || out=""
-    [ -n "$out" ] && out="Quadro (tarefas por status):
+    out="$(sqlite3 "$JARVIS/quadro.db" "select estado||': '||count(*) from cards group by estado;" 2>/dev/null)" || out=""
+    [ -n "$out" ] && out="Quadro (cards por estado):
 $out"
   fi
   printf '%s' "$out" | head -c 1500
