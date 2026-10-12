@@ -34,8 +34,8 @@ pergunta() {
 
 responde_ping() {
   local r
-  if [[ -x "$CLI" ]] && "$CLI" --help 2>&1 | grep -q -- '--ping'; then
-    JARVISD_SOCK="$SOCK" "$CLI" --ping >/dev/null 2>&1
+  if [[ -x "$CLI" ]]; then
+    JARVIS_FALA_SOCK="$SOCK" "$CLI" --ping >/dev/null 2>&1
     return
   fi
   r="$(pergunta "$PING" || true)"
