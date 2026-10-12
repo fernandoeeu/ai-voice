@@ -11,7 +11,7 @@ fn guardiao(caminho: &std::path::Path) -> GuardiaoProcesso {
 }
 
 /// Caminho em diretorio temporario, sem fd aberto no processo de teste.
-struct Tmp(tempfile::TempDir, std::path::PathBuf);
+struct Tmp(#[allow(dead_code)] tempfile::TempDir, std::path::PathBuf);
 impl Tmp {
     fn path(&self) -> &std::path::Path {
         &self.1
