@@ -21,6 +21,7 @@
     "@jarvis/announce": "workspace:*",
     "@jarvis/apple": "workspace:*",
     "@jarvis/grokbot": "workspace:*",
+    "@jarvis/quadro": "workspace:*",
     "@jarvis/telemetry": "workspace:*",
     "@jarvis/voice": "workspace:*",
     "effect": "4.0.3"

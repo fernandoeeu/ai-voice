@@ -40,12 +40,10 @@ export class Quadro extends Context.Service<Quadro, QuadroApi>()("@jarvis/mcp/Qu
   static readonly layer = Layer.effect(
     Quadro,
     Effect.tryPromise({
-      // Variable specifier: the package is optional at type-check time.
       try: async () => {
-        const spec = "@jarvis/quadro"
-        const mod = await import(spec)
+        const mod = await import("@jarvis/quadro")
         mod.abrirQuadro?.()
-        return mod as QuadroApi
+        return mod as unknown as QuadroApi
       },
       catch: (error) => new QuadroError({ message: `quadro unavailable: ${String(error)}` })
     }).pipe(Effect.map((api) => Quadro.of(api)))
