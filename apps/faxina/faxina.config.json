@@ -5,13 +5,14 @@
     "passadasCpu": 5,
     "rssBytes": 1610612736,
     "esperaSigkillS": 5,
-    "dedupeMin": 30
+    "dedupeMin": 30,
+    "crescimentoMemoria": 0.25
   },
   "nuncaMatar": ["claude", "codex", "herdr"],
   "allowlist": [
     { "nome": "escuta-instalada", "comando": "/\\.local/share/jarvis/bin/Escuta\\.app/" },
     { "nome": "kokoro-tts", "comando": "/\\.local/share/jarvis/tts/|jarvis/services/tts/server\\.py|/tts/\\.venv/bin/python" },
-    { "nome": "container-orbstack", "comando": "OrbStack|orbstack|/(container|docker|containerd|com\\.apple\\.container)[^/]*( |$)|container-runtime|vmnet" },
+    { "nome": "container-orbstack", "rssBytes": 3758096384, "comando": "OrbStack|orbstack|/(container|docker|containerd|com\\.apple\\.container)[^/]*( |$)|container-runtime|vmnet" },
     { "nome": "jarvis-app-webkit", "comando": "Jarvis\\.app|WebKit|com\\.apple\\.WebKit" },
     { "nome": "herdr", "argv0": "(^|/)herdr$" },
     { "nome": "claude", "argv0": "(^|/)claude$" },

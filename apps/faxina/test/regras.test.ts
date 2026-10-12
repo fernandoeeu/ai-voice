@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@effect/vitest"
 import { readFileSync } from "node:fs"
 import { compilarConfig } from "../src/config.ts"
-import { filtrarNovos } from "../src/estado.ts"
+import { filtrarCrescimento, filtrarNovos } from "../src/estado.ts"
 import { parseEtime, parsePs } from "../src/ps.ts"
 import { avaliar, type CpuVisto } from "../src/regras.ts"
 
@@ -205,12 +205,22 @@ describe("descontrolados", () => {
     const r = roda({ "532": { n: 4, idadeS: 999999 } })
     expect(r.cpuVisto["532"]?.n).toBe(1)
   })
-  it("alerta de memória acima de 1,5 GB, marcando o conhecido, sem matar", () => {
-    const r = roda()
+  const orb = (pid: number, gb: number) =>
+    parsePs(`  PID  PPID  PGID STAT ELAPSED %CPU RSS UID COMMAND\n  ${pid} 1 ${pid} S 00:30:00 1.0 ${Math.round(gb * 1024 ** 2)} 501 /Applications/OrbStack.app/Contents/MacOS/OrbStack Helper`)
+  const alertaOrb = (pid: number, gb: number) => roda({}, orb(pid, gb)).alertas.find((x) => x.tipo === "memoria")
+  it("OrbStack abaixo de 3,5 GB não avisa", () => {
+    expect(alertaOrb(533, 2.8)).toBeUndefined()
+    expect(alertaOrb(533, 1.9)).toBeUndefined()
+  })
+  it("OrbStack acima de 3,5 GB avisa, marcado como conhecido, sem matar", () => {
+    const r = roda({}, orb(533, 3.6))
     const a = r.alertas.find((x) => x.tipo === "memoria")
-    expect(a?.proc.pid).toBe(533)
-    expect(a?.conhecido).toBe(true)
-    expect(pidsMatar(r)).not.toContain(533)
+    expect(a).toMatchObject({ item: "container-orbstack", conhecido: true, chave: "memoria:container-orbstack" })
+    expect(r.matar.length).toBe(0)
+  })
+  it("processo sem limite próprio segue o global de 1,5 GB", () => {
+    const [p] = parsePs(`  PID  PPID  PGID STAT ELAPSED %CPU RSS UID COMMAND\n  540 1 540 S 00:30:00 1.0 ${2 * 1024 ** 2} 501 /Users/f/.local/bin/herdr server`)
+    expect(roda({}, [p!]).alertas.find((x) => x.tipo === "memoria")?.item).toBe("herdr")
   })
   it("tsserver do claude alerta mas não morre", () => {
     const r = roda({ "532": { n: 4, idadeS: 0 } })
@@ -226,5 +236,41 @@ describe("dedupe", () => {
     expect(um.novos.length).toBe(1)
     expect(filtrarNovos(a, um.enviados, 29 * 60_000, 30).novos.length).toBe(0)
     expect(filtrarNovos(a, um.enviados, 31 * 60_000, 30).novos.length).toBe(1)
+  })
+})
+
+describe("crescimento de memória", () => {
+  const GB = 1024 ** 3
+  const al = (item: string, gb: number) => [{ item, rssBytes: gb * GB }]
+  it("primeira vez acima do limite avisa", () => {
+    expect(filtrarCrescimento(al("container-orbstack", 3.6), {}, 0.25).novos.length).toBe(1)
+  })
+  it("estável acima do limite não repete", () => {
+    const um = filtrarCrescimento(al("container-orbstack", 3.6), {}, 0.25)
+    const dois = filtrarCrescimento(al("container-orbstack", 3.7), um.memoria, 0.25)
+    expect(dois.novos.length).toBe(0)
+    expect(dois.memoria["container-orbstack"]).toBe(3.6 * GB)
+  })
+  it("crescimento de 25% ou mais avisa de novo", () => {
+    const um = filtrarCrescimento(al("container-orbstack", 4), {}, 0.25)
+    expect(filtrarCrescimento(al("container-orbstack", 4.99), um.memoria, 0.25).novos.length).toBe(0)
+    const tres = filtrarCrescimento(al("container-orbstack", 5), um.memoria, 0.25)
+    expect(tres.novos.length).toBe(1)
+    expect(tres.memoria["container-orbstack"]).toBe(5 * GB)
+  })
+  it("troca de PID mantém o estado (chave é o item)", () => {
+    const r1 = avaliar(parsePs(`  PID  PPID  PGID STAT ELAPSED %CPU RSS UID COMMAND\n  600 1 600 S 00:30:00 1.0 ${4 * 1024 ** 2} 501 /Applications/OrbStack.app/Contents/MacOS/OrbStack Helper`), { config, uid: UID, meuPid: 9999, cpuAnterior: {} })
+    const r2 = avaliar(parsePs(`  PID  PPID  PGID STAT ELAPSED %CPU RSS UID COMMAND\n  777 1 777 S 00:01:00 1.0 ${4 * 1024 ** 2} 501 /Applications/OrbStack.app/Contents/MacOS/OrbStack Helper`), { config, uid: UID, meuPid: 9999, cpuAnterior: {} })
+    const a1 = r1.alertas.filter((a): a is typeof a & { item: string; rssBytes: number } => a.item !== undefined && a.rssBytes !== undefined)
+    const a2 = r2.alertas.filter((a): a is typeof a & { item: string; rssBytes: number } => a.item !== undefined && a.rssBytes !== undefined)
+    expect(a1[0]!.chave).toBe(a2[0]!.chave)
+    const um = filtrarCrescimento(a1, {}, 0.25)
+    expect(um.novos.length).toBe(1)
+    expect(filtrarCrescimento(a2, um.memoria, 0.25).novos.length).toBe(0)
+  })
+  it("voltar abaixo do limite esquece o item", () => {
+    const um = filtrarCrescimento(al("x", 4), {}, 0.25)
+    const vazio = filtrarCrescimento([], um.memoria, 0.25)
+    expect(vazio.memoria).toEqual({})
   })
 })

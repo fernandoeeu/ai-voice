@@ -12,9 +12,9 @@ import * as Telemetry from "@jarvis/telemetry"
 import { Cause, Effect, Layer, Logger } from "effect"
 import { aindaVivo, enviarEvento, lerAmbiente, lerPs, sinalizar } from "./acoes.ts"
 import { lerConfig, PASTA } from "./config.ts"
-import { estadoVazio, filtrarNovos, gravarEstado, lerEstado, registrarAcao } from "./estado.ts"
+import { estadoVazio, filtrarCrescimento, filtrarNovos, gravarEstado, lerEstado, registrarAcao } from "./estado.ts"
 import { publicar } from "./metricas.ts"
-import { avaliar } from "./regras.ts"
+import { type Alerta, avaliar } from "./regras.ts"
 
 const seco = process.argv.includes("--seco") || process.env.JARVIS_FAXINA_SECO === "1"
 const ESTADO = process.env.JARVIS_FAXINA_ESTADO ?? `${PASTA}/estado.json`
@@ -60,7 +60,11 @@ const passada = Effect.gen(function*() {
   }
 
   // Alertas com dedupe de 30 min; cada um novo vira evento ao maestro.
-  const { novos, enviados: dedupe } = filtrarNovos(r.alertas, estado.alertas, agora, config.limites.dedupeMin)
+  const porCrescimento = (a: Alerta): a is Alerta & { item: string; rssBytes: number } => a.item !== undefined && a.rssBytes !== undefined
+  const conhecidos = r.alertas.filter(porCrescimento)
+  const cresc = filtrarCrescimento(conhecidos, estado.memoria, config.limites.crescimentoMemoria)
+  const { novos: novosTempo, enviados: dedupe } = filtrarNovos(r.alertas.filter((a) => !porCrescimento(a)), estado.alertas, agora, config.limites.dedupeMin)
+  const novos: Array<Alerta> = [...novosTempo, ...cresc.novos]
   for (const a of novos) {
     const texto = `[faxina] ${a.detalhe}${a.conhecido ? " (processo conhecido, só aviso: a faxina não mata)" : ""}`
     const via = yield* Effect.promise(() => enviarEvento(texto))
@@ -80,6 +84,7 @@ const passada = Effect.gen(function*() {
     zumbis: [...r.zumbis],
     cpu: r.cpuVisto,
     alertas: dedupe,
+    memoria: cresc.memoria,
     ultima: {
       mortos,
       poupados: r.poupados.map((a) => ({ pid: a.proc.pid, padrao: a.padrao, motivo: a.motivo })),

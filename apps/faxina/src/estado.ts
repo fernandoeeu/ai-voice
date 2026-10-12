@@ -10,6 +10,8 @@ export interface Estado {
   cpu: CpuVisto
   /** Último envio ao maestro por chave de alerta (ms), para o dedupe. */
   alertas: Record<string, number>
+  /** Último RSS (bytes) avisado por item conhecido, chaveado pelo nome do item (sobrevive à troca de PID). */
+  memoria: Record<string, number>
   totais: {
     mortos: Record<string, number>
     alertas: Record<string, number>
@@ -27,6 +29,7 @@ export const estadoVazio = (): Estado => ({
   zumbis: [],
   cpu: {},
   alertas: {},
+  memoria: {},
   totais: { mortos: {}, alertas: {} },
   ultima: { mortos: [], poupados: [], alertas: [] }
 })
@@ -72,4 +75,26 @@ export const filtrarNovos = <A extends { readonly chave: string }>(
     }
   }
   return { novos, enviados: saida }
+}
+
+/**
+ * Memória de item conhecido: avisa na primeira vez acima do limite e depois só se o RSS
+ * cresceu `fator` (0,25 = 25%) ou mais sobre o último aviso. Chave = nome do item, não o pid.
+ * Item que saiu da lista (voltou abaixo do limite) é esquecido, e o próximo estouro avisa de novo.
+ */
+export const filtrarCrescimento = <A extends { readonly item: string; readonly rssBytes: number }>(
+  alertas: ReadonlyArray<A>,
+  ultimos: Record<string, number>,
+  fator: number
+): { novos: Array<A>; memoria: Record<string, number> } => {
+  const memoria: Record<string, number> = {}
+  const novos: Array<A> = []
+  for (const a of alertas) {
+    const antes = ultimos[a.item]
+    if (antes === undefined || a.rssBytes >= antes * (1 + fator)) {
+      novos.push(a)
+      memoria[a.item] = a.rssBytes
+    } else memoria[a.item] = antes
+  }
+  return { novos, memoria }
 }

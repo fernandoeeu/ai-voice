@@ -10,6 +10,8 @@ export interface Limites {
   readonly rssBytes: number
   readonly esperaSigkillS: number
   readonly dedupeMin: number
+  /** Processo conhecido acima do limite só avisa de novo se crescer esta fração (0,25 = 25%) desde o último aviso do item. */
+  readonly crescimentoMemoria: number
 }
 
 export interface Casador {
@@ -18,6 +20,8 @@ export interface Casador {
   readonly argv0?: RegExp
   /** Regex sobre a linha de comando inteira. */
   readonly comando?: RegExp
+  /** Limite de RAM (bytes) próprio deste item; ausente = `limites.rssBytes`. */
+  readonly rssBytes?: number
 }
 
 export interface RegraLixo {
@@ -42,7 +46,7 @@ export interface Config {
   readonly lixo: ReadonlyArray<RegraLixo>
 }
 
-interface BrutoCasador { nome?: string; padrao?: string; argv0?: string; comando?: string; excluir?: string }
+interface BrutoCasador { nome?: string; padrao?: string; argv0?: string; comando?: string; excluir?: string; rssBytes?: number }
 
 const re = (fonte: string | undefined, onde: string): RegExp | undefined => {
   if (fonte === undefined) return undefined
@@ -63,13 +67,14 @@ export const compilarConfig = (bruto: any): Config => {
     passadasCpu: num("passadasCpu", 5),
     rssBytes: num("rssBytes", 1.5 * 1024 ** 3),
     esperaSigkillS: num("esperaSigkillS", 5),
-    dedupeMin: num("dedupeMin", 30)
+    dedupeMin: num("dedupeMin", 30),
+    crescimentoMemoria: num("crescimentoMemoria", 0.25)
   }
   const allowlist = ((bruto.allowlist ?? []) as Array<BrutoCasador>).map((c, i): Casador => {
     const a = re(c.argv0, `allowlist[${i}].argv0`)
     const k = re(c.comando, `allowlist[${i}].comando`)
     if (!a && !k) throw new Error(`allowlist[${i}] sem argv0 nem comando`)
-    return { nome: c.nome ?? `allow-${i}`, ...(a ? { argv0: a } : {}), ...(k ? { comando: k } : {}) }
+    return { nome: c.nome ?? `allow-${i}`, ...(a ? { argv0: a } : {}), ...(k ? { comando: k } : {}), ...(typeof c.rssBytes === "number" ? { rssBytes: c.rssBytes } : {}) }
   })
   const lixo = ((bruto.lixo ?? []) as Array<BrutoCasador & { idadeMinS?: number; idadeComPaiVivoS?: number; exigeVariavel?: string; incluirFilhos?: boolean }>).map(
     (r, i): RegraLixo => {

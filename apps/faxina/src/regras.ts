@@ -30,6 +30,9 @@ export interface Alerta {
   readonly proc: Proc
   readonly conhecido: boolean
   readonly detalhe: string
+  /** Memória de processo conhecido: nome do item (chave do estado de crescimento) e RSS que gerou o aviso. */
+  readonly item?: string
+  readonly rssBytes?: number
 }
 
 export interface Zumbi {
@@ -70,8 +73,10 @@ const casaLixo = (r: RegraLixo, p: Proc) =>
   casa(r.argv0, argv0(p.comando)) && casa(r.comando, p.comando) && !(r.excluir && r.excluir.test(p.comando))
 
 /** Allowlist: só alerta, nunca mata. */
-export const naAllowlist = (p: Proc, config: Config): string | undefined =>
-  config.allowlist.find((c) => casa(c.argv0, argv0(p.comando)) && casa(c.comando, p.comando))?.nome
+const itemAllowlist = (p: Proc, config: Config) =>
+  config.allowlist.find((c) => casa(c.argv0, argv0(p.comando)) && casa(c.comando, p.comando))
+
+export const naAllowlist = (p: Proc, config: Config): string | undefined => itemAllowlist(p, config)?.nome
 
 export const fmtIdade = (s: number): string =>
   s >= 86400 ? `${(s / 86400).toFixed(1)} d` : s >= 3600 ? `${(s / 3600).toFixed(1)} h` : s >= 60 ? `${Math.round(s / 60)} min` : `${s} s`
@@ -176,14 +181,21 @@ export const avaliar = (procs: ReadonlyArray<Proc>, ctx: Contexto): Resultado =>
   for (const p of meus) {
     if (ehZumbi(p)) continue
     const conhecido = naAllowlist(p, config) !== undefined || config.nuncaMatar.includes(nomeBase(p.comando))
-    if (p.rssBytes > config.limites.rssBytes) {
-      alertas.push({
-        tipo: "memoria",
-        chave: `memoria:${p.pid}:${nomeBase(p.comando)}`,
-        proc: p,
-        conhecido,
-        detalhe: `${nomeBase(p.comando)} (pid ${p.pid}) usa ${(p.rssBytes / 1024 ** 3).toFixed(1)} GB de RAM, há ${fmtIdade(p.idadeS)}`
-      })
+    const item = itemAllowlist(p, config)
+    const limiteRss = item?.rssBytes ?? config.limites.rssBytes
+    if (p.rssBytes > limiteRss) {
+      const detalhe = `${nomeBase(p.comando)} (pid ${p.pid}) usa ${(p.rssBytes / 1024 ** 3).toFixed(1)} GB de RAM, há ${fmtIdade(p.idadeS)}`
+      if (item) {
+        // Conhecido: um aviso por item (o de maior RSS), chaveado pelo nome, não pelo pid.
+        const i = alertas.findIndex((a) => a.tipo === "memoria" && a.item === item.nome)
+        if (i < 0 || (alertas[i]!.rssBytes ?? 0) < p.rssBytes) {
+          const alerta: Alerta = { tipo: "memoria", chave: `memoria:${item.nome}`, proc: p, conhecido, detalhe, item: item.nome, rssBytes: p.rssBytes }
+          if (i >= 0) alertas[i] = alerta
+          else alertas.push(alerta)
+        }
+      } else {
+        alertas.push({ tipo: "memoria", chave: `memoria:${p.pid}:${nomeBase(p.comando)}`, proc: p, conhecido, detalhe })
+      }
     }
     if (p.cpuPct > config.limites.cpuPct) {
       const antes = ctx.cpuAnterior[String(p.pid)]
