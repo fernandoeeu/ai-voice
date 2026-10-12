@@ -39,7 +39,6 @@ sleep 1.5
 sleep 1
 "$HERE/jarvis-cala" >"$D/cala.out"
 wait $P1; R1=$?; wait $P2; R2=$?; wait $P3; R3=$?
-sleep 0.3
 "$FALA" "quarta"; R4=$?
 
 echo "--- fala.log do teste"; cat "$JARVIS_FALA_LOG"
@@ -48,4 +47,14 @@ check "2ª e 3ª descartadas (2 linhas)" '[ "$(grep -c "motor=descartada .*motiv
 check "descartadas saem com 0 e sem tocar" '[ $R2 = 0 ] && [ $R3 = 0 ]'
 check "4ª (nova) toca inteira" 'grep -q "motor=kokoro chars=6 audio_s=4 rc=0" "$JARVIS_FALA_LOG" && [ $R4 = 0 ]'
 check "cala encerrou o lockf que segurava" 'grep -q lockf "$D/cala.out"'
+
+# Dono intruso (não é fala do Jarvis) não é morto pelo cala.
+: >"$JARVIS_FALA_LOG"
+/usr/bin/lockf "$JARVIS_FALA_LOCK" sleep 5 & INT=$!
+sleep 0.5
+"$HERE/jarvis-cala" >"$D/cala2.out" 2>"$D/cala2.err"
+sleep 0.3
+check "intruso (lockf sleep) não foi morto" 'kill -0 $INT 2>/dev/null && ! grep -q . "$D/cala2.out"'
+check "intruso gerou aviso em stderr" 'grep -q "ignorado" "$D/cala2.err"'
+kill $INT 2>/dev/null; pkill -f "sleep 5" -P $INT 2>/dev/null
 exit $fail

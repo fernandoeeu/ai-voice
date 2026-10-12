@@ -14,25 +14,41 @@ LOCK="${JARVIS_FALA_LOCK:-${AI_VOICE_MAC_LOCK:-$HOME/.local/share/jarvis/fala.lo
 CANCEL="${JARVIS_FALA_CANCEL:-$(dirname "$LOCK")/fala.cancel}"
 mkdir -p "$(dirname "$CANCEL")"
 
-# O marcador primeiro: quando a fala em curso morrer e o lock soltar, o próximo já vê o cancelamento.
+# 1) Snapshot ANTES do marcador: uma fala nova que pegue o lock depois disto não está na lista e
+#    não leva SIGTERM (ela mesma vê o marcador novo ou toca normalmente).
+# Donos do lock: lockf com filho direto que seja uma fala do Jarvis (fala-kokoro.sh, afplay, say ou o
+# guard `sh -c` do speak do MCP). Outro dono (ex.: bench que usa `lockf fala.lock <bench>`) não é
+# morto: só aviso em stderr. Quem espera na fila (lockf sem filhos) e a Escuta (que só confere o
+# lock) são ignorados.
+HOLDERS=""
+if [ -e "$LOCK" ]; then
+  pid=""
+  while IFS= read -r l; do
+    case "$l" in
+      p*) pid="${l#p}" ;;
+      c*)
+        [ "${l#c}" = "lockf" ] || continue
+        kid="$(/usr/bin/pgrep -P "$pid" 2>/dev/null | head -1)"
+        [ -n "$kid" ] || continue
+        kargs="$(/bin/ps -o args= -p "$kid" 2>/dev/null | head -1)"
+        kcomm="$(/bin/ps -o comm= -p "$kid" 2>/dev/null | head -1)"
+        kcomm="${kcomm##*/}"
+        case "$kcomm:$kargs" in
+          afplay:*|say:*|*fala-kokoro.sh*|*'/sh -c [ "$(cat "$1"'*'exec "$@"'*) HOLDERS="$HOLDERS $pid" ;;
+          *) echo "jarvis-cala: dono do lock ignorado (não é fala do Jarvis): lockf pid=$pid filho=$kid cmd=$kargs" >&2 ;;
+        esac ;;
+    esac
+  done < <(/usr/sbin/lsof -F pc -- "$LOCK" 2>/dev/null)
+fi
+desc() { for p in $1; do for c in $(/usr/bin/pgrep -P "$p"); do echo "$c"; desc "$c"; done; done; }
+ALL=""
+[ -n "$HOLDERS" ] && ALL="$(for h in $HOLDERS; do echo "$h"; desc "$h"; done | sort -rn | uniq)"
+
+# 2) Marcador (escrita atômica): toda fala na fila ao conseguir o lock vê o marcador mudado.
 TOKEN="$(date +%s).$$.$RANDOM$RANDOM"
 printf '%s\n' "$TOKEN" >"$CANCEL.$$" && mv -f "$CANCEL.$$" "$CANCEL"
 
-[ -e "$LOCK" ] || exit 0
-# Donos do lock: lockf com filhos (quem espera na fila não tem filho). Os outros processos que
-# abrem o arquivo (a Escuta confere o lock de 50 em 50 ms) são ignorados.
-HOLDERS=""
-pid=""
-while IFS= read -r l; do
-  case "$l" in
-    p*) pid="${l#p}" ;;
-    c*) [ "${l#c}" = "lockf" ] && /usr/bin/pgrep -P "$pid" >/dev/null 2>&1 && HOLDERS="$HOLDERS $pid" ;;
-  esac
-done < <(/usr/sbin/lsof -F pc -- "$LOCK" 2>/dev/null)
-[ -n "$HOLDERS" ] || exit 0
-
-desc() { for p in $1; do for c in $(/usr/bin/pgrep -P "$p"); do echo "$c"; desc "$c"; done; done; }
-ALL="$(for h in $HOLDERS; do echo "$h"; desc "$h"; done | sort -rn | uniq)"
+# 3) Mata só o snapshot.
 for p in $ALL; do
   cmd="$(/bin/ps -o comm= -p "$p" 2>/dev/null | head -1)"
   kill -TERM "$p" 2>/dev/null && echo "$p ${cmd##*/}"
