@@ -68,9 +68,10 @@ export const makeMemoryFileSystem = () => {
   return { entries, layer: Layer.merge(layer, Path.layer) }
 }
 
-export const FakeConfig = Layer.succeed(
-  AlexaConfig,
-  AlexaConfig.of({
+export const makeFakeConfig = (overrides: Partial<AlexaConfig["Service"]> = {}) =>
+  Layer.succeed(
+    AlexaConfig,
+    AlexaConfig.of({
     stateDir: STATE_DIR,
     amazonPage: "amazon.com.br",
     locale: "pt-BR",
@@ -78,9 +79,12 @@ export const FakeConfig = Layer.succeed(
     speechEnabled: true,
     defaultDevice: Option.some("ECHO-1"),
     // Only the real Alexa takes this lock; under the in-memory state dir it never touches the host.
-    speakLock: `${STATE_DIR}/alexa-speak.lock`
+    speakLock: `${STATE_DIR}/alexa-speak.lock`,
+    ...overrides
   })
 )
+
+export const FakeConfig = makeFakeConfig()
 
 /**
  * A fake Alexa that records what it was asked to say; nothing reaches Amazon.
@@ -138,12 +142,13 @@ export const fakeSpeaker = (
  * Notices go to the fake Echo unless `output` is "mac".
  */
 export const makeCallbackServices = (
-  options: { readonly failSpeech?: boolean; readonly output?: SpeechOutput } = {}
+  options: { readonly failSpeech?: boolean; readonly output?: SpeechOutput; readonly speechEnabled?: boolean } = {}
 ) => {
   const fs = makeMemoryFileSystem()
   const alexa = makeFakeAlexa({ fail: options.failSpeech ?? false })
   const mac = makeFakeMacVoice({ fail: options.failSpeech ?? false })
-  const speaker = fakeSpeaker(options.output ?? "echo", alexa.layer, mac.layer)
+  const config = options.speechEnabled === false ? makeFakeConfig({ speechEnabled: false }) : FakeConfig
+  const speaker = fakeSpeaker(options.output ?? "echo", alexa.layer, mac.layer, config)
   const services = Layer.mergeAll(GrokBotOutbox.layerAt(STATE_DIR), speaker).pipe(
     Layer.provideMerge(fs.layer)
   )

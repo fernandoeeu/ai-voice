@@ -123,8 +123,8 @@ export const CallbackRoutes = CallbackTools.pipe(
   Layer.provide(McpServer.layerHttp({
     name,
     version,
-    instructions: "Deliver task results with grokbot_deliver. Use notify_fernando only for a short spoken notice; " +
-      "it is rate limited and must not be retried.",
+    instructions: "Deliver task results with grokbot_deliver. Use notify_fernando for a short fixed spoken notice, " +
+      "or speak_fernando for one short pt-BR sentence spoken on the Mac; both share a rate limit and must not be retried.",
     protocols,
     path: INTERNAL_PATH,
     allowSessionTermination: true

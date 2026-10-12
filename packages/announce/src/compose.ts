@@ -64,6 +64,9 @@ export const template = (event: AnnounceEvent, project?: string): string => TEMP
 // Free text that names a speaker or another entity breaks the single voice.
 const OFF_PERSONA = /(?<!\p{L})(claude|grok|jarvis|alexa|agentes?|agents?|sess(?:ão|ao|ões|oes)|sessions?|subagentes?|o outro|a outra|bots?)(?!\p{L})/iu
 
+/** Whether free text names a speaker or another entity, which breaks the single first-person voice. */
+export const isOffPersona = (text: string): boolean => OFF_PERSONA.test(text)
+
 /** Cuts at a word boundary and ends with an ellipsis, staying within `max` chars. */
 export const truncate = (text: string, max = MAX_ANNOUNCEMENT_LENGTH): string => {
   if (text.length <= max) return text
