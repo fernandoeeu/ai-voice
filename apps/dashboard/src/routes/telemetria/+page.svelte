@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { followLive } from '#lib/jarvis/live.js';
 	import ArrowSquareOut from 'phosphor-svelte/lib/ArrowSquareOut';
 	import CopyCommand from '#lib/components/jarvis/copy-command.svelte';
 	import ModuleHeader from '#lib/components/jarvis/module-header.svelte';
@@ -20,25 +21,19 @@
 	let connection = $state<'conectando' | 'ao-vivo' | 'reconectando'>('conectando');
 	let now = $state(untrack(() => data.painel.geradoEm));
 
-	onMount(() => {
-		now = Date.now();
-		const tick = setInterval(() => (now = Date.now()), 1000);
-		const source = new EventSource('/telemetria/ao-vivo');
-		source.onopen = () => (connection = 'ao-vivo');
-		source.onmessage = (event) => {
-			try {
-				painel = JSON.parse(event.data) as Painel;
-				connection = 'ao-vivo';
-			} catch {
-				// A broken frame: the next one replaces it.
-			}
-		};
-		source.onerror = () => (connection = 'reconectando');
-		return () => {
-			clearInterval(tick);
-			source.close();
-		};
-	});
+	// At most one update a second, nothing at all while the window is hidden. The clock only feeds
+	// "há 3 min" labels, so it ticks every 5 s.
+	onMount(() =>
+		followLive<Painel>(
+			'/telemetria/ao-vivo',
+			{
+				onData: (value) => (painel = value),
+				onStatus: (status) => (connection = status),
+				onTick: (at) => (now = at)
+			},
+			{ tickMs: 5000 }
+		)
+	);
 
 	const estado = $derived(painel.estado);
 	const servicos = $derived(estado?.servicos.length ? estado.servicos : painel.servicosProm);

@@ -57,7 +57,7 @@
 						<p class="truncate text-body font-semibold text-ink">{a.nome}</p>
 						<p class="flex flex-wrap items-center gap-x-2 text-meta">
 							<span class={['inline-flex items-center gap-1.5 font-semibold', cor[a.estado]]}>
-								<span class={['status-dot', a.estado === 'working' && 'animate-pulse']} aria-hidden="true"></span>
+								<span class="status-dot" aria-hidden="true"></span>
 								{ESTADO_ROTULO[a.estado]}
 							</span>
 							{#if tempo}<span class="tabular text-ink-soft">há {tempo}</span>{/if}

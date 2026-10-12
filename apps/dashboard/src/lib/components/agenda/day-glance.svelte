@@ -41,9 +41,6 @@
 			{@const live = focus.start <= now}
 			<div class="flex items-start gap-2.5">
 				<span class="relative mt-[0.5rem] flex size-2 shrink-0" style={toneStyle(focus.event.calendar)} aria-hidden="true">
-					{#if live}
-						<span class="cal-dot absolute inset-0 animate-ping rounded-full opacity-60 motion-reduce:hidden"></span>
-					{/if}
 					<span class="cal-dot relative size-2 rounded-full"></span>
 				</span>
 				<div class="min-w-0">

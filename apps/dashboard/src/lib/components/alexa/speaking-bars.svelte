@@ -34,7 +34,7 @@
 	}
 
 	.active > span {
-		animation: level 820ms var(--ease-in-out) infinite alternate;
+		animation: level 820ms var(--ease-in-out) 4 alternate;
 		animation-delay: calc(var(--i) * -170ms);
 	}
 

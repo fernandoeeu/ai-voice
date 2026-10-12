@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { onMount, untrack } from 'svelte';
+	import { followLive } from '#lib/jarvis/live.js';
 	import ConversationTimeline from '#lib/components/conversa/conversation-timeline.svelte';
 	import EscutaHealth from '#lib/components/conversa/escuta-health.svelte';
 	import HeardIgnored from '#lib/components/conversa/heard-ignored.svelte';
@@ -20,25 +21,14 @@
 	// Windows (Jarvis heard, request delivered) close by time alone, so the phase is recomputed every second.
 	let now = $state(untrack(() => data.snapshot.generatedAt));
 
-	onMount(() => {
-		now = Date.now();
-		const tick = setInterval(() => (now = Date.now()), 1000);
-		const source = new EventSource('/conversa/ao-vivo');
-		source.onopen = () => (connection = 'ao-vivo');
-		source.onmessage = (event) => {
-			try {
-				snapshot = JSON.parse(event.data) as Snapshot;
-				connection = 'ao-vivo';
-			} catch {
-				// A broken frame: the next one replaces it.
-			}
-		};
-		source.onerror = () => (connection = 'reconectando');
-		return () => {
-			clearInterval(tick);
-			source.close();
-		};
-	});
+	// At most one update a second, nothing at all while the window is hidden.
+	onMount(() =>
+		followLive<Snapshot>('/conversa/ao-vivo', {
+			onData: (value) => (snapshot = value),
+			onStatus: (status) => (connection = status),
+			onTick: (at) => (now = at)
+		})
+	);
 
 	// A control's message fades away on its own once the state on screen has caught up.
 	$effect(() => {

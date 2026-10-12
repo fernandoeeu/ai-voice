@@ -96,19 +96,20 @@
 	}
 	.mode-idle .bar {
 		opacity: 0.7;
-		animation: breathe 2600ms var(--ease-in-out) infinite alternate;
+		/* Finite on purpose: a state change animates, then the wave rests (an open window must not burn the GPU). */
+		animation: breathe 2600ms var(--ease-in-out) 2 alternate;
 		animation-delay: calc(var(--i) * -95ms);
 	}
 	.mode-voice .bar {
-		animation: talk 940ms var(--ease-in-out) infinite alternate;
+		animation: talk 940ms var(--ease-in-out) 4 alternate;
 		animation-delay: var(--offset);
 	}
 	.mode-speak .bar {
-		animation: talk 720ms var(--ease-in-out) infinite alternate;
+		animation: talk 720ms var(--ease-in-out) 4 alternate;
 		animation-delay: var(--offset);
 	}
 	.mode-send .bar {
-		animation: sweep 1250ms linear infinite;
+		animation: sweep 1250ms linear 2;
 		animation-delay: calc(var(--i) * 18ms - 1250ms);
 	}
 

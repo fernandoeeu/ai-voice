@@ -168,9 +168,9 @@
 		}
 	}
 
-	/* The dot beats while the escuta is alive. */
+	/* The dot beats a few times when the escuta comes alive, then holds still. */
 	.beating {
-		animation: beat 1800ms var(--ease-out) infinite;
+		animation: beat 1800ms var(--ease-out) 3;
 	}
 	@keyframes beat {
 		0% {

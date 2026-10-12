@@ -264,12 +264,24 @@ async function painel(): Promise<Painel> {
 	};
 }
 
-async function push(force = false) {
+/** Pushes only when the content changed (timestamps aside), and at most once a second. */
+const PUSH_EVERY_MS = 1000;
+let lastPushAt = 0;
+let pushTimer: ReturnType<typeof setTimeout> | undefined;
+
+async function pushNow() {
+	pushTimer = undefined;
 	const p = await painel();
-	const signature = JSON.stringify({ ...p, geradoEm: 0 });
-	if (!force && signature === lastPush) return;
+	const signature = JSON.stringify({ ...p, geradoEm: 0, estado: p.estado && { ...p.estado, geradoEm: 0 } });
+	if (signature === lastPush) return;
 	lastPush = signature;
+	lastPushAt = Date.now();
 	for (const l of listeners) l(p);
+}
+
+function push() {
+	if (pushTimer) return;
+	pushTimer = setTimeout(() => void pushNow(), Math.max(0, PUSH_EVERY_MS - (Date.now() - lastPushAt)));
 }
 
 function accept(raw: unknown) {
@@ -278,7 +290,7 @@ function accept(raw: unknown) {
 	const next = lembrarInterrupcoes(lido);
 	estado = next;
 	record(next);
-	void push();
+	push();
 }
 
 async function refreshPrometheus() {
@@ -296,7 +308,7 @@ async function refreshPrometheus() {
 			history.set(k, [...points.filter((p) => p.t < firstLive), ...live]);
 		}
 	}
-	await push();
+	push();
 }
 
 /** Follows the collector's SSE; when it is not there, polls /estado and tries the stream again. */
@@ -337,7 +349,7 @@ async function follow() {
 			if (raw === null) {
 				if (estado) {
 					estado = null;
-					void push();
+					push();
 				}
 			} else accept(raw);
 		}
@@ -359,6 +371,8 @@ function stop() {
 	abort = null;
 	if (promTimer) clearInterval(promTimer);
 	promTimer = undefined;
+	if (pushTimer) clearTimeout(pushTimer);
+	pushTimer = undefined;
 	lastPush = '';
 }
 

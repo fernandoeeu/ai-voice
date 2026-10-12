@@ -129,7 +129,7 @@
 		<div class="grid gap-2 px-4 pt-2 pb-6 sm:px-7">
 			{#each days as day (day.key)}
 				<section aria-label={day.label}>
-					<h3 class="day sticky top-13 z-10 -mx-4 bg-raised/90 px-4 py-2.5 text-micro font-semibold text-ink-soft backdrop-blur-sm sm:-mx-7 sm:px-7 md:top-0">
+					<h3 class="day sticky top-13 z-10 -mx-4 bg-raised px-4 py-2.5 text-micro font-semibold text-ink-soft sm:-mx-7 sm:px-7 md:top-0">
 						{day.label}
 					</h3>
 					<ol class="grid gap-7">
@@ -234,7 +234,7 @@
 		height: 5px;
 		border-radius: 999px;
 		background: currentColor;
-		animation: dot 1200ms var(--ease-in-out) infinite;
+		animation: dot 1200ms var(--ease-in-out) 3;
 	}
 	.dots span:nth-child(2) {
 		animation-delay: 160ms;

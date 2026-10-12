@@ -95,7 +95,7 @@
 	</aside>
 
 	<header
-		class="sticky top-0 z-20 flex h-13 items-center justify-between gap-3 border-b border-rule bg-chrome/90 px-[var(--gutter)] backdrop-blur-md backdrop-saturate-150 md:hidden"
+		class="sticky top-0 z-20 flex h-13 items-center justify-between gap-3 border-b border-rule bg-chrome px-[var(--gutter)] md:hidden"
 	>
 		<a href="/" class="flex items-center gap-2" aria-label="Jarvis, início">
 			{@render mark('size-5 text-brand')}
@@ -119,7 +119,7 @@
 
 	<nav
 		aria-label="Módulos"
-		class="fixed inset-x-0 bottom-0 z-30 border-t border-rule bg-chrome/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md backdrop-saturate-150 md:hidden"
+		class="fixed inset-x-0 bottom-0 z-30 border-t border-rule bg-chrome pb-[env(safe-area-inset-bottom)] md:hidden"
 	>
 		<ul
 			class="mx-auto grid h-[var(--tabbar-height)] max-w-lg"
