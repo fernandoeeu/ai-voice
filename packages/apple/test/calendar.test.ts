@@ -1,13 +1,13 @@
 import { BunServices } from "@effect/platform-bun"
 import { assert, describe, it } from "@effect/vitest"
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs"
+import { mkdtempSync, readdirSync, readlinkSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { Duration, Effect, Fiber, Layer, Sink, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 import { AutomationError } from "../src/apple-error.ts"
-import { buildHelper, CalendarHelper } from "../src/calendar-helper.ts"
+import { buildHelper, CalendarHelper, INSTALLED_HELPER, installHelper } from "../src/calendar-helper.ts"
 import { Calendar } from "../src/calendar.ts"
 
 // Pin a zone with DST so offsets in the formatted output are predictable.
@@ -282,6 +282,56 @@ describe("buildHelper", () => {
       assert.deepStrictEqual(readdirSync(directory), [first.slice(directory.length + 1)])
       assert.deepStrictEqual(fake.commands.map((command) => command.command), ["/usr/bin/swiftc", "/usr/bin/codesign"])
       assert.include(fake.commands[0]?.args, "__info_plist")
+    }).pipe(
+      Effect.provide(fake.spawner),
+      Effect.ensuring(Effect.sync(() => {
+        if (previous === undefined) delete process.env["JARVIS_BIN_DIR"]
+        else process.env["JARVIS_BIN_DIR"] = previous
+        rmSync(directory, { recursive: true, force: true })
+      }))
+    )
+  })
+
+  it.effect("installs the built helper under a stable name", () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvis-bin-"))
+    const previous = process.env["JARVIS_BIN_DIR"]
+    process.env["JARVIS_BIN_DIR"] = directory
+    const fake = fakeSpawner((command) => {
+      const output = command.args[command.args.indexOf("-o") + 1]
+      if (command.command === "/usr/bin/swiftc" && output !== undefined) writeFileSync(output, "binary")
+      return {}
+    })
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const installed = yield* installHelper(spawner)
+      assert.strictEqual(installed, join(directory, INSTALLED_HELPER))
+      assert.match(readlinkSync(installed), /^calendar-events-[0-9a-f]{12}$/)
+      // Reinstalling replaces the link instead of failing on the existing one.
+      assert.strictEqual(yield* installHelper(spawner), installed)
+      assert.strictEqual(readdirSync(directory).length, 2)
+    }).pipe(
+      Effect.provide(fake.spawner),
+      Effect.ensuring(Effect.sync(() => {
+        if (previous === undefined) delete process.env["JARVIS_BIN_DIR"]
+        else process.env["JARVIS_BIN_DIR"] = previous
+        rmSync(directory, { recursive: true, force: true })
+      }))
+    )
+  })
+
+  it.effect("without the sources, runs the installed helper and builds nothing", () => {
+    const directory = mkdtempSync(join(tmpdir(), "jarvis-bin-"))
+    const previous = process.env["JARVIS_BIN_DIR"]
+    process.env["JARVIS_BIN_DIR"] = directory
+    const missing = { source: join(directory, "missing.swift"), infoPlist: join(directory, "missing.plist") }
+    const fake = fakeSpawner()
+    return Effect.gen(function*() {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const error = yield* Effect.flip(buildHelper(spawner, missing))
+      assert.include(error.message, "build:native")
+      writeFileSync(join(directory, INSTALLED_HELPER), "binary")
+      assert.strictEqual(yield* buildHelper(spawner, missing), join(directory, INSTALLED_HELPER))
+      assert.deepStrictEqual(fake.commands, [])
     }).pipe(
       Effect.provide(fake.spawner),
       Effect.ensuring(Effect.sync(() => {

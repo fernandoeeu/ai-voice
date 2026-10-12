@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto"
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync } from "node:fs"
 import { homedir } from "node:os"
-import { isAbsolute, join } from "node:path"
+import { basename, isAbsolute, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { Context, Duration, Effect, Layer, Semaphore } from "effect"
+import { Context, Duration, Effect, Layer, Option, Semaphore } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { AutomationError } from "./apple-error.ts"
 import { command, type Completed, execute } from "./process.ts"
@@ -16,8 +16,22 @@ const SWIFTC = "/usr/bin/swiftc"
 const CODESIGN = "/usr/bin/codesign"
 const BUNDLE_ID = "dev.jarvis.calendar-events"
 
-const SOURCE = fileURLToPath(new URL("../native/calendar-events.swift", import.meta.url))
-const INFO_PLIST = fileURLToPath(new URL("../native/Info.plist", import.meta.url))
+/** The Swift source and Info.plist the helper is compiled from. */
+export interface HelperSources {
+  readonly source: string
+  readonly infoPlist: string
+}
+
+// Resolved next to this module. A bundled build (the dashboard's adapter-node
+// output) moves this code into a chunk where `../native` does not exist; there
+// the installed helper is used instead (see `installHelper`).
+const SOURCES: HelperSources = {
+  source: fileURLToPath(new URL("../native/calendar-events.swift", import.meta.url)),
+  infoPlist: fileURLToPath(new URL("../native/Info.plist", import.meta.url))
+}
+
+/** Stable name, inside `helperDirectory()`, of the helper published by `installHelper`. */
+export const INSTALLED_HELPER = "calendar-events"
 
 /** Where compiled helpers are cached, outside the repository. */
 export const helperDirectory = (): string => {
@@ -25,8 +39,8 @@ export const helperDirectory = (): string => {
   return override !== undefined && isAbsolute(override) ? override : join(homedir(), ".local", "share", "jarvis", "bin")
 }
 
-const sourceDigest = () =>
-  createHash("sha256").update(readFileSync(SOURCE)).update(readFileSync(INFO_PLIST)).digest("hex").slice(0, 12)
+const sourceDigest = ({ infoPlist, source }: HelperSources) =>
+  createHash("sha256").update(readFileSync(source)).update(readFileSync(infoPlist)).digest("hex").slice(0, 12)
 
 const target = () => `${process.arch === "x64" ? "x86_64" : "arm64"}-apple-macos14`
 
@@ -43,14 +57,27 @@ const step = (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"], file:
     )
   )
 
-/** Returns the absolute path of the compiled helper, compiling it if missing. */
-export const buildHelper = (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
+/**
+ * Returns the absolute path of the compiled helper, compiling it if missing.
+ * Without the sources (a bundled build) it falls back to the helper published
+ * by `installHelper`, and fails only when that is missing too.
+ */
+export const buildHelper = (
+  spawner: ChildProcessSpawner.ChildProcessSpawner["Service"],
+  sources: HelperSources = SOURCES
+) =>
   Effect.gen(function*() {
     const directory = helperDirectory()
-    const binary = join(directory, `calendar-events-${yield* Effect.try({
-      try: sourceDigest,
-      catch: () => new AutomationError({ message: "The Calendar helper sources are missing." })
-    })}`)
+    const digest = yield* Effect.option(Effect.try({ try: () => sourceDigest(sources), catch: () => undefined }))
+    if (Option.isNone(digest)) {
+      const installed = join(directory, INSTALLED_HELPER)
+      if (existsSync(installed)) return installed
+      return yield* new AutomationError({
+        message:
+          `The Calendar helper sources are missing and no installed helper was found at ${installed}. Run \`bun run build:native\` in packages/apple.`
+      })
+    }
+    const binary = join(directory, `calendar-events-${digest.value}`)
     if (existsSync(binary)) return binary
     const partial = `${binary}.partial-${process.pid}`
     yield* Effect.try({
@@ -62,7 +89,7 @@ export const buildHelper = (spawner: ChildProcessSpawner.ChildProcessSpawner["Se
         "-O",
         "-target",
         target(),
-        SOURCE,
+        sources.source,
         "-Xlinker",
         "-sectcreate",
         "-Xlinker",
@@ -70,7 +97,7 @@ export const buildHelper = (spawner: ChildProcessSpawner.ChildProcessSpawner["Se
         "-Xlinker",
         "__info_plist",
         "-Xlinker",
-        INFO_PLIST,
+        sources.infoPlist,
         "-o",
         partial
       ])
@@ -85,9 +112,31 @@ export const buildHelper = (spawner: ChildProcessSpawner.ChildProcessSpawner["Se
   })
 
 /**
+ * Builds the helper and points `helperDirectory()/calendar-events` at it, so a
+ * bundled server that ships without the sources can still run it.
+ */
+export const installHelper = (spawner: ChildProcessSpawner.ChildProcessSpawner["Service"]) =>
+  Effect.gen(function*() {
+    const binary = yield* buildHelper(spawner)
+    const installed = join(helperDirectory(), INSTALLED_HELPER)
+    if (binary === installed) return installed
+    const link = `${installed}.link-${process.pid}`
+    yield* Effect.try({
+      try: () => {
+        rmSync(link, { force: true })
+        symlinkSync(basename(binary), link)
+        renameSync(link, installed)
+      },
+      catch: () => new AutomationError({ message: `Could not install the Calendar helper at ${installed}.` })
+    }).pipe(Effect.onError(() => Effect.sync(() => rmSync(link, { force: true }))))
+    return installed
+  })
+
+/**
  * Runs the EventKit helper (`native/calendar-events.swift`). The binary is
  * compiled on first use into `helperDirectory()`, named after a digest of its
- * sources so an edited helper is rebuilt instead of reusing a stale one.
+ * sources so an edited helper is rebuilt instead of reusing a stale one. A
+ * bundled build without the sources runs the one `installHelper` published.
  */
 export class CalendarHelper extends Context.Service<CalendarHelper, {
   readonly run: (args: ReadonlyArray<string>) => Effect.Effect<Completed, AutomationError>
