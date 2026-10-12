@@ -121,7 +121,10 @@
 		aria-label="Módulos"
 		class="fixed inset-x-0 bottom-0 z-30 border-t border-rule bg-chrome/90 pb-[env(safe-area-inset-bottom)] backdrop-blur-md backdrop-saturate-150 md:hidden"
 	>
-		<ul class="mx-auto grid h-[var(--tabbar-height)] max-w-lg grid-cols-4">
+		<ul
+			class="mx-auto grid h-[var(--tabbar-height)] max-w-lg"
+			style:grid-template-columns="repeat({modules.length}, minmax(0, 1fr))"
+		>
 			{#each modules as module (module.id)}
 				{@const current = isCurrent(module.href)}
 				<li class="min-w-0">
