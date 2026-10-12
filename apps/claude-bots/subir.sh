@@ -120,13 +120,14 @@ for bot in "${BOTS[@]}"; do
     [[ -n "$ANCHOR" ]] || { echo "sem pane âncora para abrir $bot" >&2; exit 1; }
     log "$bot: criando pane (split de $ANCHOR, cwd $dir)"
     if (( DRY )); then
-      act "$HERDR" pane split --pane "$ANCHOR" --direction down --cwd "$dir" --no-focus
+      act "$HERDR" pane split --pane "$ANCHOR" --direction down --cwd "$dir" --env "JARVIS_BOT=$bot" --no-focus
       pane="<novo-$bot>"
     else
-      pane="$("$HERDR" pane split --pane "$ANCHOR" --direction down --cwd "$dir" --no-focus | jq -r '.result.pane.pane_id')"
+      pane="$("$HERDR" pane split --pane "$ANCHOR" --direction down --cwd "$dir" --env "JARVIS_BOT=$bot" --no-focus | jq -r '.result.pane.pane_id')"
     fi
   else
     log "$bot: pane $pane existe sem claude; iniciando"
+    act "$HERDR" pane run "$pane" "export JARVIS_BOT=$bot"
   fi
 
   args=()
