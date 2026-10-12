@@ -8,10 +8,12 @@
 	import HerdrAgentes from '#lib/components/telemetria/herdr-agentes.svelte';
 	import Interrupcoes from '#lib/components/telemetria/interrupcoes.svelte';
 	import Latencias from '#lib/components/telemetria/latencias.svelte';
+	import AppWebSecao from '#lib/components/telemetria/app-web.svelte';
 	import ServicosSaude from '#lib/components/telemetria/servicos-saude.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { count, duration } from '#lib/conversa/format.js';
 	import { saudePeriodico, type Painel } from '#lib/telemetria/model.js';
+	import type { AppWeb } from '#lib/telemetria/web/app.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -34,6 +36,27 @@
 			{ tickMs: 5000 }
 		)
 	);
+
+	// The "App" section changes slowly (last hour from Prometheus): one read every 15 s, only while visible.
+	let app = $state<AppWeb>(untrack(() => data.app));
+	onMount(() => {
+		const ler = async () => {
+			if (document.hidden) return;
+			try {
+				const res = await fetch('/telemetria/app', { headers: { accept: 'application/json' } });
+				if (res.ok) app = (await res.json()) as AppWeb;
+			} catch {
+				// Keeps the last read.
+			}
+		};
+		const timer = setInterval(ler, 15_000);
+		const onVisibilidade = () => !document.hidden && void ler();
+		document.addEventListener('visibilitychange', onVisibilidade);
+		return () => {
+			clearInterval(timer);
+			document.removeEventListener('visibilitychange', onVisibilidade);
+		};
+	});
 
 	const estado = $derived(painel.estado);
 	const servicos = $derived(estado?.servicos.length ? estado.servicos : painel.servicosProm);
@@ -97,9 +120,10 @@
 		<div class="grid min-w-0 gap-8">
 			<HerdrAgentes herdr={estado?.herdr ?? null} historico={painel.historico} {now} />
 		</div>
-		<aside class="grid min-w-0 gap-6 lg:sticky lg:top-10" aria-label="Voz e escuta">
+		<aside class="grid min-w-0 gap-6 lg:sticky lg:top-10" aria-label="Voz, escuta e app">
 			<Latencias latencias={painel.latencias} prometheus={painel.prometheus} entregaColetor={estado?.escuta?.entregaMs ?? null} />
 			<Interrupcoes escuta={estado?.escuta ?? null} {now} />
+			<AppWebSecao {app} />
 		</aside>
 	</div>
 </div>

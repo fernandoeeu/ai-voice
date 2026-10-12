@@ -14,9 +14,10 @@ MAC_VOICE="${AI_VOICE_MAC_VOICE:-Luciana}"
 LOCK="${AI_VOICE_MAC_LOCK:-$HOME/.local/share/jarvis/fala.lock}"
 mkdir -p "$(dirname "$LOCK")"
 
-# Reentra sob o lock (mesmo lock do jarvis-fala).
+# Reentra sob o lock (mesmo lock do jarvis-fala). O -t limita só a espera na fila por quem
+# ainda não tem o lock (sai com 75, EX_TEMPFAIL); quem já o segura toca até o fim, sem prazo.
 if [ -z "${JARVIS_FALA_LOCKED:-}" ]; then
-  JARVIS_FALA_LOCKED=1 exec /usr/bin/lockf -t 90 "$LOCK" "$0" "$@"
+  JARVIS_FALA_LOCKED=1 exec /usr/bin/lockf -t 300 "$LOCK" "$0" "$@"
 fi
 
 TMP="$(mktemp -t jarvis-tts).wav" || exit 1
