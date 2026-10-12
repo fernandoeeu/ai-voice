@@ -31,6 +31,7 @@ import Testing
         #expect(BargeIn.isNoise("."))
         #expect(BargeIn.isNoise("Hum."))
         #expect(BargeIn.isNoise("L"))
+        #expect(BargeIn.isNoise("Mm-hmm."))  // o Parakeet escreve assim o balbucio
         #expect(!BargeIn.isNoise("ok"))
         #expect(!BargeIn.isNoise("sim"))
     }
@@ -131,5 +132,38 @@ import Testing
         #expect(SpeechLock.isHeld(path))
         p.waitUntilExit()
         #expect(!SpeechLock.isHeld(path))
+    }
+}
+
+@Suite struct VadGateTests {
+    func run(_ ps: [Float], _ c: VadGate.Config = .init()) -> [VadGate.Step] {
+        var g = VadGate(config: c)
+        return ps.map { g.step($0) }
+    }
+
+    @Test func ruidoAbaixoDoLimiarNuncaAbreFala() {
+        #expect(run([0.1, 0.5, 0.3, 0.55, 0.2]).allSatisfy { $0 == .silence })
+    }
+
+    @Test func falaAbreEFechaDepoisDoSilencio() {
+        #expect(run([0.1, 0.9, 0.8, 0.1, 0.1, 0.1]) == [.silence, .start, .speech, .speech, .end(valid: true), .silence])
+    }
+
+    @Test func pausaCurtaNaoCortaAFala() {
+        // Um bloco de silêncio no meio (respiração) não fecha; a histerese segura 0,4 como voz.
+        #expect(run([0.9, 0.2, 0.4, 0.9, 0.1, 0.1]) == [.start, .speech, .speech, .speech, .speech, .end(valid: true)])
+    }
+
+    @Test func estaloCurtoNaoVaiAoReconhecedor() {
+        let c = VadGate.Config(minVoicedChunks: 2)
+        #expect(run([0.95, 0.1, 0.1], c) == [.start, .speech, .end(valid: false)])
+    }
+
+    @Test func vozDentroDaFalaUsaOLimiarMaisBaixo() {
+        var g = VadGate()
+        #expect(!g.isVoice(0.5))
+        _ = g.step(0.9)
+        #expect(g.isVoice(0.5))
+        #expect(!g.isVoice(0.2))
     }
 }

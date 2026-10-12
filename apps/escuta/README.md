@@ -35,8 +35,25 @@ A captura é só de entrada (AVCaptureSession): não mexe na saída de áudio ne
 Logs: `~/.local/share/jarvis/escuta/logs/escuta.log` (diagnóstico, com a latência de cada pedido)
 e `escuta.events.jsonl` (eventos).
 
+## Motor de reconhecimento (`ESCUTA_STT`)
+
+- `apple` (padrão): SpeechAnalyzer/SpeechTranscriber da Apple, on-device.
+- `parakeet`: NVIDIA Parakeet TDT v3 (multilíngue, pt e inglês na mesma frase) em Core ML no Neural Engine,
+  pelo [FluidAudio](https://github.com/FluidInference/FluidAudio), com VAD Silero na frente. Só o trecho
+  que a VAD marca como voz vai ao modelo: ruído não vira palavra. Enquanto a pessoa fala, o trecho é
+  transcrito de novo a cada 256 ms (para interromper o Jarvis); com silêncio, sai o texto final.
+  O silêncio que fecha a frase cai para 0,7 s (`ESCUTA_SILENCIO` ainda manda). Os modelos (~460 MB)
+  ficam em `~/Library/Application Support/FluidAudio/Models` e baixam no primeiro uso.
+
+```sh
+ESCUTA_STT=parakeet scripts/instalar.sh --carregar   # liga o Parakeet
+scripts/instalar.sh --carregar                       # volta para a Apple
+.build/release/Escuta --stt parakeet --audio /tmp/f.aiff --saida /tmp/pedidos.jsonl
+```
+
 Ajustes no `EnvironmentVariables` do plist: `ESCUTA_SILENCIO` (1.3), `ESCUTA_SILENCIO_ABERTA` (2.5),
-`ESCUTA_MIC` (parte do nome do microfone, padrão `iPhone`, cai no embutido), `ESCUTA_PANE`, `ESCUTA_ORQUESTRADOR`.
+`ESCUTA_MIC` (parte do nome do microfone, padrão `iPhone`, cai no embutido), `ESCUTA_PANE`, `ESCUTA_ORQUESTRADOR`,
+`ESCUTA_STT` (`apple` ou `parakeet`).
 
 Cada binário novo tem assinatura ad hoc diferente: o macOS pode pedir de novo a permissão do microfone.
 
