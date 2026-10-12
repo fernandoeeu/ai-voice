@@ -36,6 +36,9 @@ from mlx_audio.tts.utils import load  # noqa: E402
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("JARVIS_TTS_PORT") or 7349)
 BASE = Path(__file__).resolve().parent
+# O LaunchAgent roda com `python -I`, que tira a pasta do script do sys.path.
+sys.path.insert(0, str(BASE))
+from normaliza import normalizar  # noqa: E402
 MODEL_DIR = Path(os.environ.get("JARVIS_TTS_MODEL_DIR") or BASE / "models" / "kokoro-82m-bf16")
 VOICE_DIR = MODEL_DIR / "voices"
 DEFAULT_VOICE = os.environ.get("JARVIS_TTS_VOICE") or "pf_dora"
@@ -245,7 +248,7 @@ def synthesize(text: str, voice: str, speed: float) -> tuple[bytes, float | None
     first_at = None
     with GEN_LOCK:
         for result in MODEL.generate(
-            split_text(text),
+            split_text(normalizar(text)),
             voice=str(VOICE_DIR / f"{voice}.safetensors"),
             speed=speed,
             lang_code=LANG_CODE,

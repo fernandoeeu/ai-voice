@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Instala ou atualiza o servidor local de voz (Kokoro-82M via mlx-audio) em $JARVIS_TTS_HOME
-# (padrão ~/.local/share/jarvis/tts): copia server.py e fala-kokoro.sh, cria o venv Python com as
+# (padrão ~/.local/share/jarvis/tts): copia server.py, normaliza.py e fala-kokoro.sh, cria o venv Python com as
 # versões travadas em requirements.lock.txt e baixa o modelo com só as vozes pt-BR (~330 MB).
 #
 # Idempotente: o venv só é refeito quando o lock muda, e o modelo só é baixado se faltar.
@@ -53,7 +53,7 @@ fi
 
 say_step "Servidor de voz em $TTS_HOME"
 run mkdir -p "$TTS_HOME/logs" "$TTS_HOME/models" "$TTS_HOME/hf-cache"
-for f in server.py requirements.lock.txt; do
+for f in server.py normaliza.py requirements.lock.txt; do
 	cmp -s "$SRC/$f" "$TTS_HOME/$f" 2>/dev/null || run install -m 644 "$SRC/$f" "$TTS_HOME/$f"
 done
 cmp -s "$SRC/fala-kokoro.sh" "$TTS_HOME/fala-kokoro.sh" 2>/dev/null || run install -m 755 "$SRC/fala-kokoro.sh" "$TTS_HOME/fala-kokoro.sh"
