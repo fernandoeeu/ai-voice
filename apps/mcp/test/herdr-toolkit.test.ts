@@ -1,7 +1,8 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Layer } from "effect"
+import { Duration, Effect, Fiber, Layer } from "effect"
+import { TestClock } from "effect/testing"
 import { McpSchema, McpServer } from "effect/ai"
-import { Herdr, HerdrError, type RunHerdr } from "../src/herdr.ts"
+import { Herdr, HerdrError, settleTime, type RunHerdr } from "../src/herdr.ts"
 import { HerdrToolkitLayer } from "../src/herdr-toolkit.ts"
 
 const agent = (name: string, pane: string, status: string) => ({
@@ -22,7 +23,7 @@ const makeFake = (callerPane: string | undefined) => {
       calls.push(args)
       return args[1] === "list" ? Effect.succeed(LIST) : args[1] === "read" ? Effect.succeed("tail\n") : Effect.succeed("")
     })
-  const layer = Layer.succeed(Herdr, Herdr.make(run, callerPane))
+  const layer = Layer.succeed(Herdr, Herdr.make(run, callerPane, () => Duration.zero))
   return { calls, layer }
 }
 
@@ -102,6 +103,44 @@ describe("HerdrToolkit", () => {
         ["agent", "send-keys", "w1:p1", "enter"]
       ])
     }).pipe(Effect.provide(serve(layer)))
+  })
+
+  it.effect("serializes concurrent sends to the same pane: text and key never interleave", () => {
+    const calls: Array<string> = []
+    const run: RunHerdr = (args) =>
+      Effect.gen(function*() {
+        if (args[1] === "list") return LIST
+        calls.push(`${args[1]}:${args[3]}`)
+        yield* Effect.yieldNow
+        return ""
+      })
+    return Effect.gen(function*() {
+      const herdr = yield* Herdr
+      yield* Effect.all([
+        herdr.send({ agent: "maestro", text: "A" }),
+        herdr.send({ agent: "maestro", text: "B" })
+      ], { concurrency: "unbounded" })
+      assert.deepStrictEqual(calls, ["send-text:A", "send-keys:ctrl+enter", "send-text:B", "send-keys:ctrl+enter"])
+    }).pipe(Effect.provide(Layer.succeed(Herdr, Herdr.make(run, undefined, () => Duration.zero))))
+  })
+
+  it.effect("waits for the text to settle before pressing the key", () => {
+    const calls: Array<string> = []
+    const run: RunHerdr = (args) =>
+      Effect.sync(() => {
+        if (args[1] === "list") return LIST
+        calls.push(args[1]!)
+        return ""
+      })
+    return Effect.gen(function*() {
+      const herdr = yield* Herdr
+      const fiber = yield* Effect.forkChild(herdr.send({ agent: "maestro", text: "x".repeat(1000) }))
+      yield* Effect.yieldNow
+      assert.deepStrictEqual(calls, ["send-text"])
+      yield* TestClock.adjust(settleTime(1000))
+      yield* Fiber.join(fiber)
+      assert.deepStrictEqual(calls, ["send-text", "send-keys"])
+    }).pipe(Effect.provide(Layer.succeed(Herdr, Herdr.make(run, undefined))))
   })
 
   it.effect("maps whitelisted keys and rejects anything else", () => {

@@ -1,4 +1,4 @@
-import { Context, Duration, Effect, Layer, Metric, Schema, Stream } from "effect"
+import { Context, Duration, Effect, Layer, Metric, Schema, Semaphore, Stream } from "effect"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 
 const DEFAULT_HERDR = "herdr"
@@ -8,6 +8,14 @@ const MAX_OUTPUT = 1_000_000
 export const MAX_LINES = 1000
 export const DEFAULT_LINES = 60
 export const MAX_TEXT_LENGTH = 20_000
+
+/**
+ * Time the TUI gets to ingest pasted text before the submit key arrives. The key
+ * is a separate herdr call; if it lands while the paste is still being read, the
+ * TUI loses the head of the text. Grows with the length, capped.
+ */
+export const settleTime = (length: number): Duration.Duration =>
+  Duration.millis(Math.min(300 + length, 3000))
 
 export class HerdrError extends Schema.TaggedError<HerdrError>()("HerdrError", {
   message: Schema.String
@@ -86,7 +94,21 @@ export class Herdr extends Context.Service<Herdr, {
    * that owns this MCP server (`HERDR_PANE_ID`); `approve` and `cycle_mode` are
    * refused against it so no agent can approve its own permission request.
    */
-  static readonly make = (run: RunHerdr, callerPane: string | undefined) => {
+  static readonly make = (
+    run: RunHerdr,
+    callerPane: string | undefined,
+    settle: (length: number) => Duration.Duration = settleTime
+  ) => {
+    // One send at a time per pane: two interleaved paste+key sequences mix their texts.
+    const locks = new Map<string, Semaphore.Semaphore>()
+    const lockFor = (pane: string) => {
+      const found = locks.get(pane)
+      if (found !== undefined) return found
+      const created = Semaphore.makeUnsafe(1)
+      locks.set(pane, created)
+      return created
+    }
+
     const agents = run(["agent", "list"]).pipe(Effect.flatMap(parseAgents))
 
     const resolve = (target: string) =>
@@ -111,8 +133,11 @@ export class Herdr extends Context.Service<Herdr, {
       input: { readonly agent: string; readonly text: string; readonly steer?: boolean | undefined }
     ) {
       const agent = yield* resolve(input.agent)
-      yield* run(["pane", "send-text", agent.pane, input.text])
-      yield* run(["agent", "send-keys", agent.pane, input.steer === false ? "enter" : "ctrl+enter"])
+      yield* Effect.gen(function*() {
+        yield* run(["pane", "send-text", agent.pane, input.text])
+        yield* Effect.sleep(settle(input.text.length))
+        yield* run(["agent", "send-keys", agent.pane, input.steer === false ? "enter" : "ctrl+enter"])
+      }).pipe(lockFor(agent.pane).withPermits(1))
       yield* record(input.steer === false ? "send" : "steer", label(agent))
       return { agent: label(agent), pane: agent.pane, sent: true as const }
     })
