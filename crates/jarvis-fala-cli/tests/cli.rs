@@ -248,7 +248,7 @@ fn aceito_muito_atrasado_cai_no_legado_com_cancelamento() {
 }
 
 #[test]
-fn sem_esperar_sem_aceito_nao_faz_fallback() {
+fn sem_esperar_sem_aceito_faz_fallback_com_cancelamento() {
     let d = TempDir::new().unwrap();
     let script = d.path().join("legado.sh");
     std::fs::write(&script, "#!/bin/sh\necho legado\n").unwrap();
@@ -258,10 +258,13 @@ fn sem_esperar_sem_aceito_nao_faz_fallback() {
         .env("JARVIS_FALA_LEGADO", &script)
         .args(["--sem-esperar", "oi"])
         .assert()
-        .code(1);
-    assert!(out.get_output().stdout.is_empty());
-    // Sem cancelamento no daemon, o fallback duplicaria a fala: por isso nao ha.
-    assert_eq!(rx.recv().unwrap()["cancelar_ao_desconectar"], false);
+        .code(0);
+    assert_eq!(
+        String::from_utf8_lossy(&out.get_output().stdout).trim(),
+        "legado"
+    );
+    // O daemon cancela ao desconectar (ate o `aceito`), entao o fallback nao duplica.
+    assert_eq!(rx.recv().unwrap()["cancelar_ao_desconectar"], true);
 }
 
 #[test]

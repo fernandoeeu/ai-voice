@@ -3,9 +3,9 @@
 //! Sem tokio e sem clap, para o start ser o menor possivel. Se o socket nao
 //! existir ou recusar a conexao, faz `exec` do script legado
 //! (`fala-kokoro.sh`) na hora. Se conectar mas nao receber `aceito` em 300 ms,
-//! tambem cai no legado (o daemon cancela a fala ao ver a desconexao), exceto
-//! em `--sem-esperar`, onde nao ha cancelamento e portanto nao ha fallback
-//! (evita fala dupla). `--ping` so testa o daemon, sem fallback.
+//! tambem cai no legado (o daemon cancela a fala ao ver a desconexao, tambem em
+//! `--sem-esperar`, onde o cancelamento vale so ate o `aceito`, entao nao ha
+//! fala dupla). `--ping` so testa o daemon, sem fallback.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
@@ -99,14 +99,10 @@ fn fallback(texto: &str, voz: Option<&str>) -> ! {
     exit(rc::ERRO);
 }
 
-/// Conectou, mas o `aceito` nao veio. Com cancelamento ligado o daemon descarta
-/// a fala ao ver a desconexao, entao o legado nao duplica. Em `--sem-esperar`
-/// nao ha cancelamento: sem fallback, para nao falar duas vezes.
-fn sem_aceito(texto: &str, voz: Option<&str>, sem_esperar: bool) -> ! {
-    if sem_esperar {
-        eprintln!("jarvis-fala-rs: sem `aceito` do daemon; sem fallback em --sem-esperar");
-        exit(rc::ERRO);
-    }
+/// Conectou, mas o `aceito` nao veio. O daemon descarta a fala ao ver a
+/// desconexao (`cancelar_ao_desconectar=true`, tambem em `--sem-esperar`), entao
+/// o legado nao duplica.
+fn sem_aceito(texto: &str, voz: Option<&str>) -> ! {
     fallback(texto, voz)
 }
 
@@ -168,7 +164,6 @@ fn main() {
         fallback(&texto, voz.as_deref());
     };
 
-    let sem_esperar = args.modo == Esperar::Aceito;
     let id = format!("cli-{}", std::process::id());
     let req = Requisicao::nova(
         id,
@@ -179,10 +174,9 @@ fn main() {
             origem: Some("jarvis-fala-rs".into()),
             esperar: args.modo,
             prazo_fila_s: None,
-            // `--sem-esperar` sai logo apos o `aceito`; com cancelamento ligado o
-            // daemon cancelaria a fala nessa saida. Nos demais modos, true: se o
-            // `aceito` atrasar e cairmos no legado, o daemon cancela a fala.
-            cancelar_ao_desconectar: Some(!sem_esperar),
+            // Se o `aceito` atrasar e cairmos no legado, o daemon cancela a fala.
+            // Em `--sem-esperar` vale so ate o `aceito`; depois a fala segue sozinha.
+            cancelar_ao_desconectar: Some(true),
         },
     );
     let linha = codificar(&req).expect("requisicao serializavel");
@@ -218,13 +212,13 @@ fn main() {
         match lido {
             Ok(0) => {
                 if !aceito {
-                    sem_aceito(&texto, voz.as_deref(), sem_esperar);
+                    sem_aceito(&texto, voz.as_deref());
                 }
                 eprintln!("jarvis-fala-rs: conexao encerrada antes do fim");
                 exit(rc::ERRO);
             }
             Ok(_) => {}
-            Err(_) if !aceito => sem_aceito(&texto, voz.as_deref(), sem_esperar),
+            Err(_) if !aceito => sem_aceito(&texto, voz.as_deref()),
             Err(e) => {
                 eprintln!("jarvis-fala-rs: erro de leitura: {e}");
                 exit(rc::ERRO);
