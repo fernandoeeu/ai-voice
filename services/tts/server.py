@@ -125,7 +125,8 @@ class Telemetry:
         self.tracer = trace.get_tracer("jarvis-tts")
 
         # Nomes já no formato do Prometheus. Sem `unit` onde a unidade está no nome: assim o
-        # exportador OTLP->Prometheus não acrescenta _milliseconds/_seconds/_bytes (só _total).
+        # exportador OTLP->Prometheus não acrescenta _milliseconds/_seconds/_bytes; o _total dos
+        # contadores também vem no próprio nome.
         millis = [50, 100, 250, 500, 750, 1000, 1500, 2000, 3000, 5000, 8000, 13000, 20000, 30000, 60000]
         seconds = [0.5, 1, 2, 3, 5, 8, 13, 20, 30, 60, 120, 300]
         mp = MeterProvider(
@@ -153,8 +154,8 @@ class Telemetry:
         )
         metrics.set_meter_provider(mp)
         meter = metrics.get_meter("jarvis-tts")
-        self.requests = meter.create_counter("jarvis_tts_requisicoes", unit="{request}", description="Pedidos POST /synthesize por status HTTP")
-        self.errors = meter.create_counter("jarvis_tts_erros", unit="{error}", description="Pedidos de síntese que falharam, por tipo")
+        self.requests = meter.create_counter("jarvis_tts_requisicoes_total", unit="{request}", description="Pedidos POST /synthesize por status HTTP")
+        self.errors = meter.create_counter("jarvis_tts_erros_total", unit="{error}", description="Pedidos de síntese que falharam, por tipo")
         self.duration = meter.create_histogram("jarvis_tts_sintese_ms", description="Latência total da síntese, em ms")
         self.ttfa = meter.create_histogram("jarvis_tts_primeiro_audio_ms", description="Do pedido ao primeiro trecho de áudio gerado, em ms")
         self.audio = meter.create_histogram("jarvis_tts_audio_segundos", description="Duração do áudio gerado, em segundos")

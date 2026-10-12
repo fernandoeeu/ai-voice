@@ -1,0 +1,88 @@
+#!/bin/bash
+# Liga o maestro sempre ligado: renderiza os LaunchAgents dev.jarvis.eventos e
+# dev.jarvis.maestro em ~/Library/LaunchAgents e os (re)carrega.
+#
+#   apps/maestro/install.sh             instala e carrega
+#   apps/maestro/install.sh --dry-run   só mostra os plists
+#   apps/maestro/install.sh --hooks     imprime o trecho de hooks para o ~/.claude/settings.json
+#   apps/maestro/install.sh --remover   descarrega e apaga os dois plists
+#
+# Variáveis opcionais: JARVIS_MAESTRO_NOME (maestro), JARVIS_MAESTRO_DIR
+# (~/.local/share/jarvis/maestro), JARVIS_MAESTRO_WORKSPACE (maestro),
+# JARVIS_EVENTOS_PORT (7351). Não toca no settings.json.
+set -euo pipefail
+
+REPO="$(cd "$(dirname "$0")/../.." && pwd)"
+BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
+NOME="${JARVIS_MAESTRO_NOME:-maestro}"
+DIR="${JARVIS_MAESTRO_DIR:-$HOME/.local/share/jarvis/maestro}"
+WORKSPACE="${JARVIS_MAESTRO_WORKSPACE:-maestro}"
+PORT="${JARVIS_EVENTOS_PORT:-7351}"
+HERDR="${JARVIS_HERDR:-$HOME/.local/bin/herdr}"
+FALA="${JARVIS_FALA:-$HOME/.local/bin/jarvis-fala}"
+AGENTS_DIR="$HOME/Library/LaunchAgents"
+DOMAIN="gui/$(id -u)"
+LABELS=(dev.jarvis.eventos dev.jarvis.maestro)
+
+hooks() {
+	cat <<JSON
+"SessionStart": [
+  {
+    "matcher": "startup|resume|compact|clear",
+    "hooks": [{ "type": "command", "command": "$BUN $REPO/apps/maestro/src/hooks/session-start.ts", "timeout": 10 }]
+  }
+],
+"PreCompact": [
+  {
+    "hooks": [{ "type": "command", "command": "$BUN $REPO/apps/maestro/src/hooks/pre-compact.ts", "timeout": 30 }]
+  }
+]
+JSON
+}
+
+render() {
+	local xml_esc
+	xml_esc() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1" | sed -e 's/[\\|&]/\\&/g'; }
+	sed -e "s|@BUN@|$(xml_esc "$BUN")|g" -e "s|@REPO@|$(xml_esc "$REPO")|g" -e "s|@NOME@|$(xml_esc "$NOME")|g" \
+		-e "s|@DIR@|$(xml_esc "$DIR")|g" -e "s|@WORKSPACE@|$(xml_esc "$WORKSPACE")|g" -e "s|@PORT@|$PORT|g" \
+		-e "s|@HERDR@|$(xml_esc "$HERDR")|g" -e "s|@FALA@|$(xml_esc "$FALA")|g" -e "s|@HOME@|$(xml_esc "$HOME")|g" "$1"
+}
+
+case "${1:-}" in
+--hooks)
+	hooks
+	exit 0
+	;;
+--remover)
+	for label in "${LABELS[@]}"; do
+		launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
+		rm -f "$AGENTS_DIR/$label.plist"
+	done
+	echo "Maestro desligado (a memória em $DIR fica)."
+	exit 0
+	;;
+esac
+
+for label in "${LABELS[@]}"; do
+	if [ "${1:-}" = "--dry-run" ]; then
+		echo "== $AGENTS_DIR/$label.plist"
+		render "$REPO/apps/maestro/launchd/$label.plist.in"
+		continue
+	fi
+	mkdir -p -m 700 "$DIR" "$DIR/logs"
+	out="$(mktemp)"
+	render "$REPO/apps/maestro/launchd/$label.plist.in" >"$out"
+	plutil -lint "$out" >/dev/null
+	install -m 644 "$out" "$AGENTS_DIR/$label.plist"
+	rm -f "$out"
+	launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
+	for _ in $(seq 1 50); do launchctl print "$DOMAIN/$label" >/dev/null 2>&1 || break; sleep 0.2; done
+	launchctl bootstrap "$DOMAIN" "$AGENTS_DIR/$label.plist"
+	echo "Carregado: $label"
+done
+
+[ "${1:-}" = "--dry-run" ] && exit 0
+[ -f "$DIR/rotinas.json" ] || install -m 600 "$REPO/apps/maestro/rotinas.example.json" "$DIR/rotinas.json"
+echo "Rotinas: $DIR/rotinas.json"
+echo "URL de eventos: $(cd "$REPO/apps/maestro" && JARVIS_MAESTRO_DIR="$DIR" JARVIS_EVENTOS_PORT="$PORT" "$BUN" src/eventos-main.ts --print-url)"
+echo "Hooks para o ~/.claude/settings.json (dentro de \"hooks\"): apps/maestro/install.sh --hooks"
