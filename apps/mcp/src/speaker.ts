@@ -59,12 +59,12 @@ export class Speaker extends Context.Service<Speaker, {
 }
 
 /**
- * The real speech services: `Speaker` with the Mac voice and Alexa behind it, plus `Alexa` and
- * `AlexaConfig` for the tools that use them directly. One instance serves every session.
+ * The real speech services: `Speaker` with the Mac voice and Alexa behind it, plus `Alexa`,
+ * `AlexaConfig` and `MacVoice` for the tools that use them directly. One instance serves every session.
  */
 export const SpeechLive = Speaker.layer.pipe(
   Layer.provideMerge(Alexa.layer),
   Layer.provideMerge(AlexaConfig.layer),
-  Layer.provide(MacVoice.layer.pipe(Layer.provide(MacVoiceConfig.layer))),
+  Layer.provideMerge(MacVoice.layer.pipe(Layer.provide(MacVoiceConfig.layer))),
   Layer.provide(FetchHttpClient.layer)
 )

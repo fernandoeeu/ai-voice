@@ -133,7 +133,7 @@ describe("callback server", () => {
       const { tools } = yield* client.request("tools/list").pipe(
         Effect.flatMap((response) => decodeToolList(response.result))
       )
-      assert.deepStrictEqual(tools.map((tool) => tool.name).sort(), ["grokbot_deliver", "notify_fernando"])
+      assert.deepStrictEqual(tools.map((tool) => tool.name).sort(), ["grokbot_deliver", "notify_fernando", "speak_fernando"])
 
       const delivered = yield* client.request("tools/call", {
         name: "grokbot_deliver",

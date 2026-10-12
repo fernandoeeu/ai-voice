@@ -26,7 +26,7 @@ const cli = Command.make("jarvis-callback", { printUrl }, ({ printUrl }) =>
     return yield* Layer.launch(CallbackTransport({ port, token }))
   })).pipe(
     Command.withDescription(
-      "Serves grokbot_deliver and notify_fernando on http://127.0.0.1:<port>/mcp/<token> for the Grok Bot connector."
+      "Serves grokbot_deliver, notify_fernando and speak_fernando on http://127.0.0.1:<port>/mcp/<token> for the Grok Bot connector."
     ),
     Command.provide(Services)
   )
