@@ -60,8 +60,8 @@ fn eventos_ida_e_volta() {
         volta_msg(Evento::Erro { codigo: c, mensagem: "m".into() });
     }
     volta_msg(Evento::Pong);
-    volta_msg(Evento::Estado(EstadoDaemon { falando: Some(FalaId(1)), fila: 3, kokoro_saudavel: true, dispositivo: Some("AirPods".into()), taxa: Some(48_000), manter: true }));
-    volta_msg(Evento::Estado(EstadoDaemon { falando: None, fila: 0, kokoro_saudavel: false, dispositivo: None, taxa: None, manter: false }));
+    volta_msg(Evento::Estado(EstadoDaemon { falando: Some(FalaId(1)), fila: 3, kokoro_saudavel: true, dispositivo: Some("AirPods".into()), taxa: Some(48_000), manter: Manter::Janela(30) }));
+    volta_msg(Evento::Estado(EstadoDaemon { falando: None, fila: 0, kokoro_saudavel: false, dispositivo: None, taxa: None, manter: Manter::Sempre }));
 }
 
 #[test]

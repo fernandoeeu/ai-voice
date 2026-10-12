@@ -77,8 +77,38 @@ pub struct EstadoDaemon {
     pub dispositivo: Option<String>,
     /// Taxa do dispositivo de saida em Hz, se conhecida.
     pub taxa: Option<u32>,
-    /// Se o daemon esta mantendo o dispositivo acordado (fone sem dormir).
-    pub manter: bool,
+    /// Politica de manter o dispositivo de saida aberto (fone sem dormir).
+    pub manter: Manter,
+}
+
+/// Politica de manter o stream de audio aberto entre falas.
+/// Serde: `"sempre"`, `"nunca"`, `{"janela": 30}` (segundos).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Manter {
+    /// Stream sempre aberto e ativo (padrao).
+    #[default]
+    Sempre,
+    /// Mantem aberto por N segundos depois do fim de cada fala.
+    Janela(u32),
+    /// Abre e fecha por fala (equivale ao afplay).
+    Nunca,
+}
+
+impl std::str::FromStr for Manter {
+    type Err = String;
+    /// `sempre`, `nunca` ou `janela:<segundos>`.
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s.trim() {
+            "sempre" => Ok(Self::Sempre),
+            "nunca" => Ok(Self::Nunca),
+            outro => outro
+                .strip_prefix("janela:")
+                .and_then(|n| n.trim().parse::<u32>().ok())
+                .map(Self::Janela)
+                .ok_or_else(|| format!("manter invalido: {outro:?} (sempre|janela:<s>|nunca)")),
+        }
+    }
 }
 
 /// Eventos daemon -> cliente.
