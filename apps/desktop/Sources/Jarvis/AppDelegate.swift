@@ -100,6 +100,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
                 load()
                 return
             }
+            // Máquina nova: sem o LaunchAgent do dashboard, prepara o mínimo e abre o onboarding.
+            if !server.dashboardInstalled {
+                showStatusPage(
+                    title: "Preparando o Jarvis pela primeira vez…",
+                    detail: "Instalando o Bun se faltar, as dependências e o dashboard. Leva alguns minutos; "
+                        + "o log fica em ~/.local/share/jarvis/onboarding/primeira-execucao.log.",
+                    retry: false)
+                let result = await server.bootstrap()
+                if !result.ok {
+                    showStatusPage(title: "Não deu para preparar o Jarvis", detail: result.tail, retry: true)
+                    return
+                }
+            }
             showStatusPage(title: "Ligando o Jarvis…", detail: "Subindo o servidor do dashboard pelo launchd.", retry: false)
             if await server.ensureUp() {
                 load()
@@ -113,8 +126,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         }
     }
 
+    /// Abre o dashboard; na primeira execução (sem config concluída), direto no onboarding.
     private func load() {
-        webView.load(URLRequest(url: server.url))
+        webView.load(URLRequest(url: server.isConfigured ? server.url : server.onboardingURL))
+    }
+
+    /// Configurações: refaz o onboarding (dependências, modelos, módulos e segredos).
+    @objc func openSettings() {
+        showWindow()
+        webView.load(URLRequest(url: server.settingsURL))
     }
 
     @objc func reload() {
@@ -242,6 +262,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         let menu = NSMenu()
         menu.addItem(item("Abrir o Jarvis", #selector(showWindow), "j", [.control, .option]))
         menu.addItem(item("Recarregar", #selector(reload)))
+        menu.addItem(item("Configurações…", #selector(openSettings), ","))
         menu.addItem(item("Reiniciar o servidor", #selector(restartServer)))
         menu.addItem(.separator())
         menu.addItem(item("Abrir no login", #selector(toggleLoginItem)))
@@ -257,6 +278,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate, WKNa
         appMenu.addItem(NSMenuItem(title: "Sobre o Jarvis",
                                    action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)), keyEquivalent: ""))
         appMenu.addItem(.separator())
+        appMenu.addItem(item("Configurações…", #selector(openSettings), ","))
         appMenu.addItem(item("Abrir no login", #selector(toggleLoginItem)))
         appMenu.addItem(item("Reiniciar o servidor", #selector(restartServer)))
         appMenu.addItem(.separator())

@@ -14,6 +14,57 @@ struct Server {
     private var domain: String { "gui/\(getuid())" }
     private var plist: String { NSHomeDirectory() + "/Library/LaunchAgents/\(Server.label).plist" }
 
+    /// Raiz do repositório: JARVIS_REPO, senão a chave JarvisRepo que o instalar.sh grava no Info.plist.
+    var repo: String? {
+        let env = ProcessInfo.processInfo.environment["JARVIS_REPO"]
+        let fromBundle = Bundle.main.object(forInfoDictionaryKey: "JarvisRepo") as? String
+        return [env, fromBundle].compactMap { $0 }.first {
+            FileManager.default.fileExists(atPath: $0 + "/scripts/setup.sh")
+        }
+    }
+
+    var onboardingURL: URL { url.appendingPathComponent("onboarding") }
+    var settingsURL: URL { URL(string: onboardingURL.absoluteString + "?refazer")! }
+
+    /// O dashboard ainda não foi instalado como LaunchAgent nesta máquina.
+    var dashboardInstalled: Bool { FileManager.default.fileExists(atPath: plist) }
+
+    /// Já passou pelo onboarding? Sim com ~/.config/jarvis/config.json concluído, ou numa instalação anterior
+    /// ao onboarding (jarvis.env + LaunchAgent do dashboard). Mesma regra do servidor (isConfigured).
+    var isConfigured: Bool {
+        let dir = NSHomeDirectory() + "/.config/jarvis"
+        let fm = FileManager.default
+        if let data = fm.contents(atPath: dir + "/config.json") {
+            let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+            return json?["concluidoEm"] is String
+        }
+        return fm.fileExists(atPath: dir + "/jarvis.env") && dashboardInstalled
+    }
+
+    /// Primeira execução sem o dashboard: roda apps/desktop/scripts/primeira-execucao.sh (Bun, bun install,
+    /// build e LaunchAgent). Devolve o código de saída e o fim do log.
+    func bootstrap() async -> (ok: Bool, tail: String) {
+        guard let repo else { return (false, "Não achei o repositório do Jarvis. Reinstale com apps/desktop/scripts/instalar.sh.") }
+        return await withCheckedContinuation { cont in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/bash")
+            process.arguments = [repo + "/apps/desktop/scripts/primeira-execucao.sh", repo]
+            var env = ProcessInfo.processInfo.environment
+            env["PATH"] = "\(NSHomeDirectory())/.bun/bin:\(NSHomeDirectory())/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            process.environment = env
+            // A saída vai para o log (o script faz tee); um Pipe lido só no fim travaria com saída grande.
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            let log = NSHomeDirectory() + "/.local/share/jarvis/onboarding/primeira-execucao.log"
+            process.terminationHandler = { p in
+                let out = (try? String(contentsOfFile: log, encoding: .utf8)) ?? ""
+                let tail = out.split(separator: "\n").suffix(4).joined(separator: "\n")
+                cont.resume(returning: (p.terminationStatus == 0, tail))
+            }
+            do { try process.run() } catch { cont.resume(returning: (false, error.localizedDescription)) }
+        }
+    }
+
     func isUp() async -> Bool {
         let request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2)
         let session = URLSession(configuration: .ephemeral)

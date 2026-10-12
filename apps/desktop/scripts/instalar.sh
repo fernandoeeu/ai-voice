@@ -43,6 +43,8 @@ STAGE="$PKG/.build/Jarvis.app"
 rm -rf "$STAGE"
 mkdir -p "$STAGE/Contents/MacOS" "$STAGE/Contents/Resources"
 cp "$PKG/Resources/Info.plist" "$STAGE/Contents/Info.plist"
+# Onde está o repositório nesta máquina: a primeira execução usa para instalar o dashboard e abrir o onboarding.
+/usr/libexec/PlistBuddy -c "Add :JarvisRepo string $(cd "$PKG/../.." && pwd)" "$STAGE/Contents/Info.plist"
 cp "$PKG/Resources/AppIcon.icns" "$STAGE/Contents/Resources/AppIcon.icns"
 cp "$BIN" "$STAGE/Contents/MacOS/Jarvis"
 codesign --force --sign "$SIGN" --identifier "$BUNDLE_ID" "$STAGE"
