@@ -3,6 +3,7 @@ import CalendarBlank from 'phosphor-svelte/lib/CalendarBlank';
 import ChatsCircle from 'phosphor-svelte/lib/ChatsCircle';
 import ListChecks from 'phosphor-svelte/lib/ListChecks';
 import NavigationArrow from 'phosphor-svelte/lib/NavigationArrow';
+import Robot from 'phosphor-svelte/lib/Robot';
 import Pulse from 'phosphor-svelte/lib/Pulse';
 import SpeakerHigh from 'phosphor-svelte/lib/SpeakerHigh';
 
@@ -20,5 +21,6 @@ export const modules: ReadonlyArray<JarvisModule> = [
 	{ id: 'lembretes', label: 'Lembretes', href: '/lembretes', icon: ListChecks },
 	{ id: 'agenda', label: 'Agenda', href: '/agenda', icon: CalendarBlank },
 	{ id: 'ir', label: 'Ir & ligar', href: '/ir', icon: NavigationArrow },
-	{ id: 'telemetria', label: 'Telemetria', href: '/telemetria', icon: Pulse }
+	{ id: 'telemetria', label: 'Telemetria', href: '/telemetria', icon: Pulse },
+	{ id: 'agentes', label: 'Agentes', href: '/agentes', icon: Robot }
 ];
