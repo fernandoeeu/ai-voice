@@ -48,6 +48,8 @@ describe("ResumoEscuta", () => {
       erros: 0
     })
     expect(s.entrega_ms).toMatchObject({ amostras: 2, ultima: 9000, maxima: 9000, p50: 2614 })
+    // Só o pedido que chegou (ok) conta na espera do fim da fala.
+    expect(s.latencia_fim_fala_ms).toMatchObject({ amostras: 1, p50: 2614, p95: 2614 })
     expect(s.interrupcao_kill_ms).toMatchObject({ amostras: 1, ultima: 207 })
     expect(s.confianca).toMatchObject({ amostras: 2, media: 0.66 })
     expect(s.microfone).toBe("Microfone do iPhone")
@@ -63,6 +65,7 @@ describe("ResumoEscuta", () => {
     const s = r.estado()
     expect(s.contadores.pedidos).toBe(0)
     expect(s.entrega_ms.amostras).toBe(0)
+    expect(s.latencia_fim_fala_ms).toMatchObject({ amostras: 1, p50: 2614 })
     expect(s.ultimos_eventos).toHaveLength(LINHAS.length)
     expect(s.microfone).toBe("Microfone do iPhone")
   })
@@ -83,6 +86,9 @@ describe("registrarEscuta", () => {
       const entrega = serie("jarvis_escuta_entrega_ms", { ok: "true" })[0]!
       expect(entrega.type === "Histogram" && entrega.state.sum).toBe(2614)
       expect(serie("jarvis_escuta_roteamento_ms")).toHaveLength(2)
+      const fimFala = serie("jarvis_escuta_latencia_fim_fala_ms")
+      expect(fimFala.map((m) => m.attributes)).toEqual([{ who: "maestro" }])
+      expect(fimFala[0]!.type === "Histogram" && fimFala[0]!.state.sum).toBe(2614)
 
       const interrupcoes = serie("jarvis_escuta_interrupcoes_total")
       expect(interrupcoes.map((m) => m.attributes?.gatilho).sort()).toEqual(["fala", "palavra"])

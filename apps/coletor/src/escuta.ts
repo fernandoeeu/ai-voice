@@ -91,6 +91,8 @@ export interface EstadoEscuta {
   readonly saida: string | null
   readonly contadores: Contadores
   readonly entrega_ms: ResumoMedida
+  /** Fim da fala até o pedido chegar (routed com ok); semeado com o histórico do arquivo. */
+  readonly latencia_fim_fala_ms: ResumoMedida
   readonly roteamento_ms: ResumoMedida
   readonly interrupcao_kill_ms: ResumoMedida
   readonly confianca: ResumoMedida
@@ -112,8 +114,10 @@ export const resumirEvento = (evento: EventoEscuta): Record<string, unknown> => 
 
 /**
  * Acumula o que a Escuta contou. Contadores e medidas valem desde que o
- * coletor subiu; `semear` só preenche fase, microfone e últimos eventos com o
- * histórico do arquivo, sem contar nada.
+ * coletor subiu; `semear` preenche fase, microfone e últimos eventos com o
+ * histórico do arquivo, sem contar nada, e só semeia a janela de
+ * latencia_fim_fala_ms (que assim já tem p50/p95 ao subir). Semeado e
+ * aplicado nunca se cruzam: o seguidor começa no fim do arquivo.
  */
 export class ResumoEscuta {
   private readonly desde = new Date().toISOString()
@@ -133,6 +137,7 @@ export class ResumoEscuta {
     erros: 0
   }
   private readonly entrega = new Janela()
+  private readonly fimFala = new Janela()
   private readonly roteamento = new Janela()
   private readonly killMs = new Janela()
   private readonly confianca = new Janela()
@@ -142,6 +147,13 @@ export class ResumoEscuta {
 
   semear(evento: EventoEscuta): void {
     this.aplicarEstado(evento)
+    this.medirFimFala(evento)
+  }
+
+  private medirFimFala(evento: EventoEscuta): void {
+    if (evento.type !== "routed" || !booleano(evento.ok)) return
+    const latencia = numero(evento.latency_ms)
+    if (latencia !== undefined && latencia >= 0) this.fimFala.add(latencia)
   }
 
   aplicar(evento: EventoEscuta): void {
@@ -161,6 +173,7 @@ export class ResumoEscuta {
         else c.falhas++
         const latencia = numero(evento.latency_ms)
         if (latencia !== undefined) this.entrega.add(latencia)
+        this.medirFimFala(evento)
         const ms = numero(evento.ms)
         if (ms !== undefined) this.roteamento.add(ms)
         break
@@ -221,6 +234,7 @@ export class ResumoEscuta {
       saida: this.saida,
       contadores: { ...this.contadores },
       entrega_ms: this.entrega.resumo(),
+      latencia_fim_fala_ms: this.fimFala.resumo(),
       roteamento_ms: this.roteamento.resumo(),
       interrupcao_kill_ms: this.killMs.resumo(),
       confianca: this.confianca.resumo(),

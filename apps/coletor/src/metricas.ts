@@ -12,12 +12,17 @@ import type { EstadoHerdr } from "./herdr.ts"
 const MS = [25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 4000, 5000, 7500, 10000, 15000, 30000, 60000]
 const KILL_MS = [10, 25, 50, 100, 150, 200, 250, 300, 400, 500, 750, 1000, 2000, 5000]
 const CONFIANCA = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.75, 0.8, 0.85, 0.9, 0.95, 1]
+const FIM_FALA_MS = [50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 2500, 3000, 3500, 4000, 5000, 7500, 10000]
 const SEGUNDOS = [0.5, 1, 2, 3, 5, 8, 13, 20, 30, 60]
 
 // Escuta
 export const entregaMs = Metric.histogram("jarvis_escuta_entrega_ms", {
   description: "Do fim da fala até o pedido entregue (latency_ms do routed), em ms.",
   boundaries: MS
+})
+export const latenciaFimFalaMs = Metric.histogram("jarvis_escuta_latencia_fim_fala_ms", {
+  description: "Espera entre o fim da fala e o pedido chegar ao destino (latency_ms dos routed com ok), em ms, por destino (who).",
+  boundaries: FIM_FALA_MS
 })
 export const roteamentoMs = Metric.histogram("jarvis_escuta_roteamento_ms", {
   description: "Tempo do envio ao destino (ms do routed), em ms.",
@@ -72,6 +77,9 @@ export const registrarEscuta = (evento: EventoEscuta): Effect.Effect<void> => {
       return Effect.all([
         Metric.update(Metric.withAttributes(pedidos, atributos), 1),
         latencia === undefined ? Effect.void : Metric.update(Metric.withAttributes(entregaMs, atributos), latencia),
+        latencia === undefined || !booleano(evento.ok)
+          ? Effect.void
+          : Metric.update(Metric.withAttributes(latenciaFimFalaMs, { who: atributos.who }), latencia),
         ms === undefined ? Effect.void : Metric.update(Metric.withAttributes(roteamentoMs, atributos), ms)
       ], { discard: true })
     }
