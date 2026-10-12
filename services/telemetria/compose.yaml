@@ -28,6 +28,9 @@ services:
       GF_ANALYTICS_CHECK_FOR_UPDATES: "false"
       # Retenção curta (3 dias em Prometheus, Tempo e Loki): é um Mac pessoal, não um data lake.
       PROMETHEUS_EXTRA_ARGS: "--storage.tsdb.retention.time=3d"
+      # Cada plugin de datasource com backend sobe um processo próprio (~5-15 MiB cada); o painel
+      # usa só Prometheus, Loki e Tempo (Pyroscope fica: tem datasource provisionado).
+      GF_PLUGINS_DISABLE_PLUGINS: "elasticsearch,influxdb,mssql,mysql,opentsdb,zipkin,jaeger,grafana-postgresql-datasource,stackdriver,grafana-llm-app"
     volumes:
       - jarvis-telemetria-data:/data
       - ./grafana/dashboards.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/jarvis.yaml:ro
@@ -40,7 +43,10 @@ services:
       - ./lgtm/tempo-config.yaml:/otel-lgtm/tempo-config.yaml:ro
       - ./lgtm/loki-config.yaml:/otel-lgtm/loki-config.yaml:ro
     cpus: 1.0
-    mem_limit: 1.5g
+    # Uso real (anon) fica em ~300-600 MiB; acima disso era cache de página do volume, que o
+    # OrbStack segura na VM e aparece no RSS do OrbStack Helper no macOS.
+    mem_limit: 1g
+    memswap_limit: 1.5g
 
 volumes:
   jarvis-telemetria-data:
