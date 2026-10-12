@@ -2,7 +2,7 @@ use std::ffi::OsString;
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
-use jarvis_lock::{Guardiao, GuardiaoProcesso, esta_preso};
+use jarvis_lock::{ErroLock, Guardiao, GuardiaoProcesso, esta_preso};
 
 const BIN: &str = env!("CARGO_BIN_EXE_jarvis-lock-guardiao");
 
@@ -101,7 +101,7 @@ async fn prazo_esgota_com_outro_segurando() {
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
     let r = guardiao(f.path()).segurar(Duration::from_millis(300)).await;
-    assert!(r.is_err());
+    assert_eq!(r.unwrap_err(), ErroLock::Prazo);
     let _ = outro.kill();
     let _ = outro.wait();
 }
@@ -133,4 +133,36 @@ trait Ignora {
 }
 impl<T, E> Ignora for Result<T, E> {
     fn unwrap_err_or_ok(self) {}
+}
+
+#[tokio::test]
+async fn guardiao_morto_antes_do_ok_e_morreu() {
+    let f = tmp();
+    // Sai na hora, sem escrever "ok".
+    let g = GuardiaoProcesso::new("/usr/bin/false", Vec::<OsString>::new(), f.path());
+    let r = g.segurar(Duration::from_secs(5)).await;
+    assert_eq!(r.unwrap_err(), ErroLock::Morreu);
+}
+
+#[tokio::test]
+async fn binario_inexistente_e_spawn() {
+    let f = tmp();
+    let g = GuardiaoProcesso::new("/nao/existe/guardiao", Vec::<OsString>::new(), f.path());
+    let r = g.segurar(Duration::from_secs(5)).await;
+    assert!(matches!(r, Err(ErroLock::Spawn(_))), "{r:?}");
+}
+
+#[tokio::test]
+async fn drop_mata_o_guardiao_pela_thread_dona() {
+    let f = tmp();
+    let g = guardiao(f.path())
+        .segurar(Duration::from_secs(5))
+        .await
+        .unwrap();
+    let morreu = g.morreu();
+    drop(g);
+    tokio::time::timeout(Duration::from_secs(2), morreu)
+        .await
+        .expect("guardiao nao morreu apos o drop");
+    assert!(!esta_preso(f.path()));
 }
