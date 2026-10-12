@@ -131,16 +131,31 @@ export const createWorkspace = (options: { cwd: string; label: string; env: Read
     return root_pane.pane_id
   })
 
-/** Cria uma aba num workspace que já existe e devolve o pane raiz. */
-export const createTab = (options: { workspace: string; cwd: string; env: Readonly<Record<string, string>> }) =>
+const WorkspacePane = Schema.Struct({
+  pane_id: Schema.String,
+  tab_id: Schema.String,
+  focused: Schema.optionalKey(Schema.Boolean)
+})
+
+/** Os panes de um workspace. */
+export const listPanes = (workspace: string) =>
+  Effect.gen(function*() {
+    const herdr = yield* Herdr
+    const result = yield* herdr.call(["pane", "list", "--workspace", workspace])
+    const { panes } = yield* decode(Schema.Struct({ panes: Schema.Array(WorkspacePane) }))(result)
+    return panes
+  })
+
+/** Abre um pane novo ao lado de `pane` (à direita, sem tirar o foco) e devolve o id. */
+export const splitPane = (options: { pane: string; cwd: string; env: Readonly<Record<string, string>> }) =>
   Effect.gen(function*() {
     const herdr = yield* Herdr
     const result = yield* herdr.call([
-      "tab", "create", "--workspace", options.workspace, "--cwd", options.cwd, "--label", "maestro", "--no-focus",
+      "pane", "split", "--pane", options.pane, "--direction", "right", "--cwd", options.cwd, "--no-focus",
       ...envArgs(options.env)
     ])
-    const { root_pane } = yield* decode(Schema.Struct({ root_pane: Pane }))(result)
-    return root_pane.pane_id
+    const { pane } = yield* decode(Schema.Struct({ pane: Pane }))(result)
+    return pane.pane_id
   })
 
 /** O pane, se ainda existir. */

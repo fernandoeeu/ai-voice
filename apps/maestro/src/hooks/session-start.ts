@@ -2,12 +2,13 @@
 /**
  * Hook SessionStart (startup|resume|compact|clear) do maestro.
  *
- * Só age quando a sessão roda na casa do maestro (`<JARVIS_MAESTRO_DIR>/casa`):
+ * Só age na sessão do maestro (casa dele, pane do vigia ou pane que o herdr
+ * chama de maestro):
  * grava o id da sessão em `sessao.json` (o vigia retoma com `--resume <id>`)
  * e devolve o `estado.md` como additionalContext. Fora disso, sai calado.
  */
 import { paths } from "../config.ts"
-import { ehMaestro, garantirEstado, gravar, maestroDir } from "../memoria.ts"
+import { ehSessaoDoMaestro, garantirEstado, gravar, maestroDir } from "../memoria.ts"
 import { readFileSync } from "node:fs"
 
 interface Entrada {
@@ -19,9 +20,9 @@ interface Entrada {
 
 const entrada: Entrada = JSON.parse((await Bun.stdin.text()) || "{}")
 const dir = maestroDir()
-if (!ehMaestro(entrada.cwd, dir) || !entrada.session_id) process.exit(0)
-
 const nome = process.env.JARVIS_MAESTRO_NOME || "maestro"
+if (!entrada.session_id || !ehSessaoDoMaestro(entrada.cwd, dir, nome)) process.exit(0)
+
 const estado = garantirEstado(dir, nome)
 gravar(
   paths(dir).sessao,

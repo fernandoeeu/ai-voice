@@ -8,7 +8,7 @@
 #   apps/maestro/install.sh --remover   descarrega e apaga os dois plists
 #
 # Variáveis opcionais: JARVIS_MAESTRO_NOME (maestro), JARVIS_MAESTRO_DIR
-# (~/.local/share/jarvis/maestro), JARVIS_MAESTRO_WORKSPACE (maestro),
+# (~/.local/share/jarvis/maestro), JARVIS_MAESTRO_WORKSPACE (o do maestro vivo),
 # JARVIS_EVENTOS_PORT (7351). Não toca no settings.json.
 set -euo pipefail
 
@@ -16,9 +16,19 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
 NOME="${JARVIS_MAESTRO_NOME:-maestro}"
 DIR="${JARVIS_MAESTRO_DIR:-$HOME/.local/share/jarvis/maestro}"
-WORKSPACE="${JARVIS_MAESTRO_WORKSPACE:-maestro}"
 PORT="${JARVIS_EVENTOS_PORT:-7351}"
 HERDR="${JARVIS_HERDR:-$HOME/.local/bin/herdr}"
+# Os panes que o vigia cria ficam no workspace do maestro vivo (pelo rótulo, que sobrevive a um
+# reinício do herdr); sem maestro no ar, num workspace "maestro".
+workspace_do_maestro() {
+	"$HERDR" agent get "$NOME" 2>/dev/null | /usr/bin/python3 -c '
+import json, subprocess, sys
+ws = json.load(sys.stdin)["result"]["agent"]["workspace_id"]
+lista = json.loads(subprocess.run([sys.argv[1], "workspace", "list"], capture_output=True, text=True).stdout)
+print(next(w.get("label") or ws for w in lista["result"]["workspaces"] if w["workspace_id"] == ws))
+' "$HERDR" 2>/dev/null || echo maestro
+}
+WORKSPACE="${JARVIS_MAESTRO_WORKSPACE:-$(workspace_do_maestro)}"
 FALA="${JARVIS_FALA:-$HOME/.local/bin/jarvis-fala}"
 AGENTS_DIR="$HOME/Library/LaunchAgents"
 DOMAIN="gui/$(id -u)"

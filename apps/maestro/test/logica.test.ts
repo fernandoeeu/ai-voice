@@ -1,11 +1,11 @@
 import { describe, expect, it } from "@effect/vitest"
 import { Option } from "effect"
-import { mkdirSync, mkdtempSync } from "node:fs"
+import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { decidir } from "../src/entrega.ts"
 import { formatarEntrega, limparOrigem } from "../src/fila.ts"
-import { atualizarAuto, AUTO_FIM, AUTO_INICIO, ehMaestro, renderizar, resumirTranscript } from "../src/memoria.ts"
+import { atualizarAuto, AUTO_FIM, AUTO_INICIO, ehMaestro, ehSessaoDoMaestro, renderizar, resumirTranscript } from "../src/memoria.ts"
 import { devidas, type Rotina } from "../src/rotinas.ts"
 import { argsClaude } from "../src/vigia.ts"
 
@@ -99,6 +99,16 @@ describe("memória", () => {
     expect(ehMaestro(dir, dir)).toBe(false)
     expect(ehMaestro(join(dir, "casa2"), dir)).toBe(false)
     expect(ehMaestro(undefined, dir)).toBe(false)
+  })
+  it("reconhece o maestro pelo pane do vigia ou pelo nome no herdr", () => {
+    const dir = mkdtempSync(join(tmpdir(), "maestro-"))
+    const herdr = join(dir, "herdr")
+    writeFileSync(herdr, `#!/bin/bash\n[ "$3" = "w1:p2" ] && echo '{"result":{"agent":{"name":"maestro"}}}' || echo '{"result":{"agent":{}}}'\n`)
+    chmodSync(herdr, 0o755)
+    expect(ehSessaoDoMaestro("/repo", dir, "maestro", { JARVIS_MAESTRO_NOME: "maestro" })).toBe(true)
+    expect(ehSessaoDoMaestro("/repo", dir, "maestro", { JARVIS_HERDR: herdr, HERDR_PANE_ID: "w1:p2" })).toBe(true)
+    expect(ehSessaoDoMaestro("/repo", dir, "maestro", { JARVIS_HERDR: herdr, HERDR_PANE_ID: "w1:p3" })).toBe(false)
+    expect(ehSessaoDoMaestro("/repo", dir, "maestro", {})).toBe(false)
   })
   it("renderiza os modelos", () => {
     expect(renderizar("@NOME@ fala com @FALA@ @NOME@", { NOME: "m", FALA: "f" })).toBe("m fala com f m")

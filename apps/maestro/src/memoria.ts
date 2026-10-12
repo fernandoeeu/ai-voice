@@ -1,4 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, renameSync, writeFileSync } from "node:fs"
+import { spawnSync } from "node:child_process"
+import { homedir } from "node:os"
 import { join, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { DEFAULT_DIR, paths } from "./config.ts"
@@ -30,6 +32,33 @@ export const ehMaestro = (cwd: string | undefined, dir: string) => {
   const casa = real(paths(dir).casa)
   const atual = real(cwd)
   return atual === casa || atual.startsWith(casa + sep)
+}
+
+/** O nome que o herdr dá ao agente do pane `paneId`, se der algum (até 3 s). */
+const nomeNoHerdr = (paneId: string, env: Readonly<Record<string, string | undefined>>) => {
+  const herdr = env.JARVIS_HERDR || join(homedir(), ".local", "bin", "herdr")
+  try {
+    const saida = spawnSync(herdr, ["agent", "get", paneId], { encoding: "utf8", timeout: 3_000 })
+    return JSON.parse(saida.stdout)?.result?.agent?.name as string | undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * Se esta sessão é a do maestro: roda na casa dele, num pane que o vigia
+ * criou (com `JARVIS_MAESTRO_NOME` no ambiente) ou num pane que o herdr chama
+ * pelo nome do maestro. Qualquer outra sessão é ignorada pelos hooks.
+ */
+export const ehSessaoDoMaestro = (
+  cwd: string | undefined,
+  dir: string,
+  nome: string,
+  env: Readonly<Record<string, string | undefined>> = process.env
+) => {
+  if (ehMaestro(cwd, dir)) return true
+  if (env.JARVIS_MAESTRO_NOME === nome) return true
+  return env.HERDR_PANE_ID ? nomeNoHerdr(env.HERDR_PANE_ID, env) === nome : false
 }
 
 /** Troca os marcadores `@CHAVE@` de um modelo de `agente/`. */
