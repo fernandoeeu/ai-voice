@@ -21,6 +21,11 @@ pub type Result<T> = anyhow::Result<T>;
 /// Fonte de audio sintetizado. Uma chamada por frase, para tocar a frase N
 /// enquanto a N+1 e sintetizada.
 pub trait Sintetizador: Send + Sync {
-    fn sintetizar(&self, frase: &str, voz: &str, vel: f32) -> impl Future<Output = Result<Pcm24k>> + Send;
+    fn sintetizar(
+        &self,
+        frase: &str,
+        voz: &str,
+        vel: f32,
+    ) -> impl Future<Output = Result<Pcm24k>> + Send;
     fn saudavel(&self) -> impl Future<Output = bool> + Send;
 }

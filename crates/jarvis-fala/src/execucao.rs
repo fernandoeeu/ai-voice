@@ -40,7 +40,11 @@ pub(crate) struct Ctx<S, A> {
 
 impl<S, A> Clone for Ctx<S, A> {
     fn clone(&self) -> Self {
-        Self { synth: self.synth.clone(), saida: self.saida.clone(), cfg: self.cfg.clone() }
+        Self {
+            synth: self.synth.clone(),
+            saida: self.saida.clone(),
+            cfg: self.cfg.clone(),
+        }
     }
 }
 
@@ -118,7 +122,10 @@ where
     // Guardiao e primeira sintese em paralelo.
     let mut lock = e.lock.clone();
     let esperar_lock = async move { lock.wait_for(|v| *v).await.is_ok() };
-    let (p0, lock_ok) = tokio::join!(ctx.synth.sintetizar(&frases[0], &e.voz, e.vel), esperar_lock);
+    let (p0, lock_ok) = tokio::join!(
+        ctx.synth.sintetizar(&frases[0], &e.voz, e.vel),
+        esperar_lock
+    );
     if !lock_ok {
         return crate::ator::RC_ERRO;
     }
@@ -161,7 +168,9 @@ where
                     tracing::warn!("kokoro falhou na frase {}, say no resto: {err:#}", i + 2);
                     // Fecha o bloco com um pedaco vazio para a saida avisar `Esvaziou`.
                     tocar(&ctx.saida, id, Pcm24k::new(Vec::new()), true).await;
-                    return Produzido { resto: Some(frases[i + 1..].join(" ")) };
+                    return Produzido {
+                        resto: Some(frases[i + 1..].join(" ")),
+                    };
                 }
             }
         }

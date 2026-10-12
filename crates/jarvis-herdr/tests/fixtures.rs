@@ -21,7 +21,10 @@ fn agent_get_le_agente() {
     assert_eq!(v["result"]["type"], "agent_info");
     let a: AgenteInfo = serde_json::from_value(v["result"]["agent"].clone()).unwrap();
     assert!(!a.pane_id.is_empty());
-    assert!(matches!(a.agent_status, StatusAgente::Working | StatusAgente::Idle | StatusAgente::Done | StatusAgente::Blocked));
+    assert!(matches!(
+        a.agent_status,
+        StatusAgente::Working | StatusAgente::Idle | StatusAgente::Done | StatusAgente::Blocked
+    ));
 }
 
 #[test]
@@ -34,6 +37,12 @@ fn agent_list_le_agentes() {
 
 #[test]
 fn subscribe_e_erro() {
-    assert_eq!(fixture("events.subscribe.resposta.json")["result"]["type"], "subscription_started");
-    assert_eq!(fixture("erro.resposta.json")["error"]["code"], "invalid_request");
+    assert_eq!(
+        fixture("events.subscribe.resposta.json")["result"]["type"],
+        "subscription_started"
+    );
+    assert_eq!(
+        fixture("erro.resposta.json")["error"]["code"],
+        "invalid_request"
+    );
 }

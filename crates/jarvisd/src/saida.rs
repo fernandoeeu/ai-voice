@@ -36,7 +36,9 @@ impl SaidaDaemon {
 
     pub fn dispositivo(&self) -> (Option<String>, Option<u32>) {
         match self {
-            Self::Cpal(c) => c.dispositivo().map_or((None, None), |(n, t)| (Some(n), Some(t))),
+            Self::Cpal(c) => c
+                .dispositivo()
+                .map_or((None, None), |(n, t)| (Some(n), Some(t))),
             Self::Fake(_) => (Some("fake".into()), Some(24_000)),
         }
     }

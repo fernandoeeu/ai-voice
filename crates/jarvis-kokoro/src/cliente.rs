@@ -28,20 +28,40 @@ pub struct KokoroHttp {
 impl KokoroHttp {
     /// `base` sem barra final, por exemplo [`URL_PADRAO`].
     pub fn new(base: impl Into<String>) -> Result<Self> {
-        let http = reqwest::Client::builder().timeout(TIMEOUT).no_proxy().build()?;
-        Ok(Self { base: base.into().trim_end_matches('/').to_owned(), http })
+        let http = reqwest::Client::builder()
+            .timeout(TIMEOUT)
+            .no_proxy()
+            .build()?;
+        Ok(Self {
+            base: base.into().trim_end_matches('/').to_owned(),
+            http,
+        })
     }
 
     /// Vozes disponiveis (`GET /voices`).
     pub async fn vozes(&self) -> Result<Vec<String>> {
-        let r = self.http.get(format!("{}/voices", self.base)).send().await.map_err(ErroKokoro::from)?;
+        let r = self
+            .http
+            .get(format!("{}/voices", self.base))
+            .send()
+            .await
+            .map_err(ErroKokoro::from)?;
         let status = r.status();
         let corpo = r.text().await.map_err(ErroKokoro::from)?;
         if !status.is_success() {
-            return Err(ErroKokoro::Http { status: status.as_u16(), corpo }.into());
+            return Err(ErroKokoro::Http {
+                status: status.as_u16(),
+                corpo,
+            }
+            .into());
         }
         let j: serde_json::Value = serde_json::from_str(&corpo)?;
-        Ok(j["voices"].as_array().into_iter().flatten().filter_map(|v| v.as_str().map(str::to_owned)).collect())
+        Ok(j["voices"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|v| v.as_str().map(str::to_owned))
+            .collect())
     }
 }
 
@@ -60,7 +80,11 @@ impl Sintetizador for KokoroHttp {
         let bytes = r.bytes().await.map_err(ErroKokoro::from)?;
         if !status.is_success() {
             let corpo = String::from_utf8_lossy(&bytes).into_owned();
-            return Err(ErroKokoro::Http { status: status.as_u16(), corpo }.into());
+            return Err(ErroKokoro::Http {
+                status: status.as_u16(),
+                corpo,
+            }
+            .into());
         }
         Ok(wav::decodificar(&bytes).map_err(ErroKokoro::from)?)
     }

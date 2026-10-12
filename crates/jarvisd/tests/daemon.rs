@@ -75,10 +75,19 @@ fn atender(c: TcpStream, wav: &[u8]) {
         if r.read_exact(&mut corpo).is_err() {
             return;
         }
-        let (tipo, dados): (&str, Vec<u8>) =
-            if health { ("application/json", br#"{"ok":true}"#.to_vec()) } else { ("audio/wav", wav.to_vec()) };
-        let cab = format!("HTTP/1.1 200 OK\r\nContent-Type: {tipo}\r\nContent-Length: {}\r\n\r\n", dados.len());
-        if w.write_all(cab.as_bytes()).and_then(|()| w.write_all(&dados)).is_err() {
+        let (tipo, dados): (&str, Vec<u8>) = if health {
+            ("application/json", br#"{"ok":true}"#.to_vec())
+        } else {
+            ("audio/wav", wav.to_vec())
+        };
+        let cab = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: {tipo}\r\nContent-Length: {}\r\n\r\n",
+            dados.len()
+        );
+        if w.write_all(cab.as_bytes())
+            .and_then(|()| w.write_all(&dados))
+            .is_err()
+        {
             return;
         }
     }
@@ -126,7 +135,10 @@ impl Daemon {
     }
 
     fn term(&self) {
-        let st = Command::new("kill").args(["-TERM", &self.filho.id().to_string()]).status().unwrap();
+        let st = Command::new("kill")
+            .args(["-TERM", &self.filho.id().to_string()])
+            .status()
+            .unwrap();
         assert!(st.success());
     }
 
@@ -158,7 +170,10 @@ impl Cliente {
     fn conectar(sock: &Path) -> Self {
         let w = UnixStream::connect(sock).unwrap();
         w.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
-        Self { r: BufReader::new(w.try_clone().unwrap()), w }
+        Self {
+            r: BufReader::new(w.try_clone().unwrap()),
+            w,
+        }
     }
 
     fn enviar(&mut self, v: &Value) {
@@ -206,7 +221,10 @@ fn ping_pong() {
     let mut c = d.cliente();
     c.enviar(&json!({"v":1,"id":"p1","op":"ping"}));
     let m = c.ler();
-    assert_eq!((m["ev"].as_str(), m["id"].as_str(), m["v"].as_u64()), (Some("pong"), Some("p1"), Some(1)));
+    assert_eq!(
+        (m["ev"].as_str(), m["id"].as_str(), m["v"].as_u64()),
+        (Some("pong"), Some("p1"), Some(1))
+    );
     // varias mensagens na mesma conexao
     c.enviar(&json!({"v":1,"id":"p2","op":"ping"}));
     assert_eq!(c.ler()["id"], "p2");
@@ -220,7 +238,10 @@ fn erro_de_protocolo_vira_ev_erro() {
     assert_eq!(c.ler()["ev"], "erro");
     c.enviar(&json!({"v":2,"id":"x","op":"ping"}));
     let m = c.ler();
-    assert_eq!((m["ev"].as_str(), m["id"].as_str(), m["codigo"].as_str()), (Some("erro"), Some("x"), Some("protocolo")));
+    assert_eq!(
+        (m["ev"].as_str(), m["id"].as_str(), m["codigo"].as_str()),
+        (Some("erro"), Some("x"), Some("protocolo"))
+    );
     // a conexao continua util
     c.enviar(&json!({"v":1,"id":"ok","op":"ping"}));
     assert_eq!(c.ler()["ev"], "pong");
@@ -288,7 +309,11 @@ fn desconectar_cancela_fala_tocando() {
     assert_eq!(obs.ler()["ev"], "estado");
 
     let mut c = d.cliente();
-    c.falar("f", "vai ser cortada", json!({"cancelar_ao_desconectar": true}));
+    c.falar(
+        "f",
+        "vai ser cortada",
+        json!({"cancelar_ao_desconectar": true}),
+    );
     c.ate("primeiro_som");
     let t = Instant::now();
     drop(c);
@@ -297,7 +322,10 @@ fn desconectar_cancela_fala_tocando() {
     let fim = v.last().unwrap();
     assert_eq!(fim["rc"], 143, "{v:?}");
     assert!(t.elapsed() < Duration::from_secs(2), "cancelamento demorou");
-    assert!(v.iter().all(|m| m["id"].is_null()), "eventos assinados nao levam id");
+    assert!(
+        v.iter().all(|m| m["id"].is_null()),
+        "eventos assinados nao levam id"
+    );
 }
 
 #[test]
@@ -436,7 +464,14 @@ fn sigterm_com_fala_cala_solta_o_lock_e_sai_com_zero() {
 }
 
 fn lockf(lock: &Path) -> i32 {
-    Command::new("lockf").args(["-t", "0"]).arg(lock).arg("true").status().unwrap().code().unwrap()
+    Command::new("lockf")
+        .args(["-t", "0"])
+        .arg(lock)
+        .arg("true")
+        .status()
+        .unwrap()
+        .code()
+        .unwrap()
 }
 
 #[test]
@@ -467,7 +502,9 @@ fn modo_segurar_lock_sai_com_75_para_o_lockf() {
         .spawn()
         .unwrap();
     let mut ok = String::new();
-    BufReader::new(g.stdout.take().unwrap()).read_line(&mut ok).unwrap();
+    BufReader::new(g.stdout.take().unwrap())
+        .read_line(&mut ok)
+        .unwrap();
     assert_eq!(ok.trim(), "ok");
     assert_eq!(lockf(&lock), 75);
     drop(g.stdin.take()); // dono some: o guardiao sai com 0

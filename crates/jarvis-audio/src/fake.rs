@@ -67,7 +67,10 @@ impl FakeSaida {
         let mut rx = self.nucleo.sinais.lock().unwrap();
         while let Ok(s) = rx.pop() {
             let _ = self.tx.send(match s {
-                Sinal::PrimeiroSom { fala, hora } => EventoSaida::PrimeiroSom { fala, hora_saida: hora },
+                Sinal::PrimeiroSom { fala, hora } => EventoSaida::PrimeiroSom {
+                    fala,
+                    hora_saida: hora,
+                },
                 Sinal::Esvaziou { fala } => EventoSaida::Esvaziou { fala },
             });
         }
@@ -77,7 +80,10 @@ impl FakeSaida {
     pub fn reconstruir(&self, nova_taxa: u32) -> usize {
         let n = self.nucleo.reconstruir(nova_taxa, 1);
         self.taxa.store(nova_taxa, Ordering::Relaxed);
-        let _ = self.tx.send(EventoSaida::DispositivoMudou { nome: "fake".into(), taxa: nova_taxa });
+        let _ = self.tx.send(EventoSaida::DispositivoMudou {
+            nome: "fake".into(),
+            taxa: nova_taxa,
+        });
         n
     }
 
@@ -93,9 +99,16 @@ impl Saida for FakeSaida {
 
     /// No fake o fade roda aqui mesmo, avancando o relogio o suficiente.
     fn calar(&self, fade_ms: u32) {
-        self.nucleo.ctl.fade_ms.store(fade_ms.clamp(1, 200), std::sync::atomic::Ordering::Relaxed);
-        self.nucleo.ctl.pedidos.fetch_add(1, std::sync::atomic::Ordering::Release);
-        let frames = (u64::from(fade_ms) * u64::from(self.taxa.load(Ordering::Relaxed)) / 1000) as usize + 2;
+        self.nucleo
+            .ctl
+            .fade_ms
+            .store(fade_ms.clamp(1, 200), std::sync::atomic::Ordering::Relaxed);
+        self.nucleo
+            .ctl
+            .pedidos
+            .fetch_add(1, std::sync::atomic::Ordering::Release);
+        let frames =
+            (u64::from(fade_ms) * u64::from(self.taxa.load(Ordering::Relaxed)) / 1000) as usize + 2;
         self.avancar(frames);
     }
 

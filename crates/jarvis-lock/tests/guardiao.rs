@@ -27,7 +27,10 @@ fn tmp() -> Tmp {
 #[tokio::test]
 async fn lockf_sai_75_com_guardiao_vivo() {
     let f = tmp();
-    let g = guardiao(f.path()).segurar(Duration::from_secs(5)).await.unwrap();
+    let g = guardiao(f.path())
+        .segurar(Duration::from_secs(5))
+        .await
+        .unwrap();
     let st = Command::new("/usr/bin/lockf")
         .args(["-t", "0"])
         .arg(f.path())
@@ -41,23 +44,39 @@ async fn lockf_sai_75_com_guardiao_vivo() {
 #[tokio::test]
 async fn sigterm_no_guardiao_avisa_rapido() {
     let f = tmp();
-    let g = guardiao(f.path()).segurar(Duration::from_secs(5)).await.unwrap();
+    let g = guardiao(f.path())
+        .segurar(Duration::from_secs(5))
+        .await
+        .unwrap();
     let pid = g.pid().unwrap();
     let morreu = g.morreu();
     let t = Instant::now();
-    Command::new("kill").args(["-TERM", &pid.to_string()]).status().unwrap();
+    Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .unwrap();
     tokio::time::timeout(Duration::from_millis(50), morreu)
         .await
         .expect("morreu() demorou mais de 50 ms");
-    eprintln!("latencia_morte_ms={:.2}", t.elapsed().as_secs_f64() * 1000.0);
+    eprintln!(
+        "latencia_morte_ms={:.2}",
+        t.elapsed().as_secs_f64() * 1000.0
+    );
     assert!(!esta_preso(f.path()));
 }
 
 #[tokio::test]
 async fn processo_de_teste_nao_aparece_no_lsof() {
     let f = tmp();
-    let g = guardiao(f.path()).segurar(Duration::from_secs(5)).await.unwrap();
-    let out = Command::new("lsof").arg("-t").arg(f.path()).output().unwrap();
+    let g = guardiao(f.path())
+        .segurar(Duration::from_secs(5))
+        .await
+        .unwrap();
+    let out = Command::new("lsof")
+        .arg("-t")
+        .arg(f.path())
+        .output()
+        .unwrap();
     let pids: Vec<u32> = String::from_utf8_lossy(&out.stdout)
         .lines()
         .filter_map(|l| l.trim().parse().ok())
@@ -92,11 +111,16 @@ async fn esta_preso_nos_momentos_certos() {
     let f = tmp();
     assert!(!esta_preso(f.path()));
     assert!(!esta_preso(&f.path().with_extension("naoexiste")));
-    let g = guardiao(f.path()).segurar(Duration::from_secs(5)).await.unwrap();
+    let g = guardiao(f.path())
+        .segurar(Duration::from_secs(5))
+        .await
+        .unwrap();
     assert!(esta_preso(f.path()));
     let morreu = g.morreu();
     drop(g);
-    tokio::time::timeout(Duration::from_secs(1), morreu).await.unwrap_err_or_ok();
+    tokio::time::timeout(Duration::from_secs(1), morreu)
+        .await
+        .unwrap_err_or_ok();
     let t = Instant::now();
     while esta_preso(f.path()) {
         assert!(t.elapsed() < Duration::from_secs(2));

@@ -69,7 +69,11 @@ fn argumento_e_voz() {
 fn stdin_e_voz_do_ambiente() {
     let d = TempDir::new().unwrap();
     let (rx, sock) = servidor(d.path(), vec![aceito(), fim(0)]);
-    cli(&sock).env("JARVIS_TTS_VOICE", "pm_alex").write_stdin("do stdin\n").assert().code(0);
+    cli(&sock)
+        .env("JARVIS_TTS_VOICE", "pm_alex")
+        .write_stdin("do stdin\n")
+        .assert()
+        .code(0);
     let req = rx.recv().unwrap();
     assert_eq!(req["texto"], "do stdin");
     assert_eq!(req["voz"], "pm_alex");
@@ -105,7 +109,11 @@ fn primeiro_som_e_verboso() {
     let d = TempDir::new().unwrap();
     let ps = json!({"v":1,"ev":"primeiro_som","fala":1,"ms":42});
     let (_rx, sock) = servidor(d.path(), vec![aceito(), ps]);
-    let out = cli(&sock).env("JARVIS_FALA_VERBOSO", "1").args(["--primeiro-som", "oi"]).assert().code(0);
+    let out = cli(&sock)
+        .env("JARVIS_FALA_VERBOSO", "1")
+        .args(["--primeiro-som", "oi"])
+        .assert()
+        .code(0);
     assert!(String::from_utf8_lossy(&out.get_output().stderr).contains("ms=42"));
 }
 
@@ -119,18 +127,28 @@ fn sigterm_so_fecha_a_conexao() {
         .stdout(Stdio::null())
         .spawn()
         .unwrap();
-    assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap()["op"], "falar");
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5)).unwrap()["op"],
+        "falar"
+    );
     thread::sleep(Duration::from_millis(200));
     enviar_sigterm(filho.id());
     let status = filho.wait().unwrap();
     assert_eq!(status.code(), Some(143));
     // O servidor falso ve EOF (o canal fecha) e nunca recebe `calar`.
-    assert_eq!(rx.recv_timeout(Duration::from_secs(5)), Err(mpsc::RecvTimeoutError::Disconnected));
+    assert_eq!(
+        rx.recv_timeout(Duration::from_secs(5)),
+        Err(mpsc::RecvTimeoutError::Disconnected)
+    );
 }
 
 fn enviar_sigterm(pid: u32) {
     // `kill` do sistema: o workspace proibe unsafe.
-    let ok = std::process::Command::new("kill").arg("-TERM").arg(pid.to_string()).status().unwrap();
+    let ok = std::process::Command::new("kill")
+        .arg("-TERM")
+        .arg(pid.to_string())
+        .status()
+        .unwrap();
     assert!(ok.success());
 }
 
@@ -145,7 +163,10 @@ fn sem_socket_faz_exec_do_legado() {
         .args(["oi", "pf_dora"])
         .assert()
         .code(7);
-    assert_eq!(String::from_utf8_lossy(&out.get_output().stdout).trim(), "legado:oi:pf_dora");
+    assert_eq!(
+        String::from_utf8_lossy(&out.get_output().stdout).trim(),
+        "legado:oi:pf_dora"
+    );
 }
 
 #[test]
@@ -155,6 +176,13 @@ fn servidor_mudo_cai_no_legado() {
     std::fs::write(&script, "#!/bin/sh\necho \"legado:$1\"\n").unwrap();
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     let (_rx, sock) = servidor(d.path(), vec![]);
-    let out = cli(&sock).env("JARVIS_FALA_LEGADO", &script).write_stdin("via stdin").assert().code(0);
-    assert_eq!(String::from_utf8_lossy(&out.get_output().stdout).trim(), "legado:via stdin");
+    let out = cli(&sock)
+        .env("JARVIS_FALA_LEGADO", &script)
+        .write_stdin("via stdin")
+        .assert()
+        .code(0);
+    assert_eq!(
+        String::from_utf8_lossy(&out.get_output().stdout).trim(),
+        "legado:via stdin"
+    );
 }

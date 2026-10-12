@@ -2,7 +2,12 @@ use jarvis_audio::{EventoSaida, FakeSaida, FalaId, Pcm24k, Saida};
 
 fn tom(freq: f32, n: usize) -> Pcm24k {
     Pcm24k::new(
-        (0..n).map(|i| (0.5 * (2.0 * std::f32::consts::PI * freq * i as f32 / 24_000.0).sin() * 32767.0) as i16).collect(),
+        (0..n)
+            .map(|i| {
+                (0.5 * (2.0 * std::f32::consts::PI * freq * i as f32 / 24_000.0).sin() * 32767.0)
+                    as i16
+            })
+            .collect(),
     )
 }
 
@@ -25,16 +30,25 @@ fn primeiro_som_e_esvaziou_na_ordem() {
     f.avancar(4_800); // 100 ms tocados: ainda falta metade
     let ev = eventos(&mut rx);
     assert_eq!(ev.len(), 1, "{ev:?}");
-    let EventoSaida::PrimeiroSom { fala, hora_saida } = ev[0] else { panic!("{ev:?}") };
+    let EventoSaida::PrimeiroSom { fala, hora_saida } = ev[0] else {
+        panic!("{ev:?}")
+    };
     assert_eq!(fala, FalaId(1));
     // 480 frames de silencio = 10 ms, mais a latencia de 10 ms
     let esperado = f.hora_base() + std::time::Duration::from_millis(10) + f.latencia();
-    let d = if hora_saida > esperado { hora_saida - esperado } else { esperado - hora_saida };
+    let d = if hora_saida > esperado {
+        hora_saida - esperado
+    } else {
+        esperado - hora_saida
+    };
     assert!(d < std::time::Duration::from_micros(100), "{d:?}");
     f.avancar(4_799); // falta 1 amostra
     assert!(eventos(&mut rx).is_empty(), "Esvaziou cedo demais");
     f.avancar(1);
-    assert_eq!(eventos(&mut rx), vec![EventoSaida::Esvaziou { fala: FalaId(1) }]);
+    assert_eq!(
+        eventos(&mut rx),
+        vec![EventoSaida::Esvaziou { fala: FalaId(1) }]
+    );
     f.avancar(480);
     assert!(eventos(&mut rx).is_empty());
 }
@@ -46,10 +60,16 @@ fn esvaziou_so_no_bloco_ultimo() {
     f.tocar(FalaId(7), tom(300.0, 1_000), false);
     f.avancar(5_000); // buffer secou mas a fala nao terminou
     let ev = eventos(&mut rx);
-    assert!(matches!(ev.as_slice(), [EventoSaida::PrimeiroSom { .. }]), "{ev:?}");
+    assert!(
+        matches!(ev.as_slice(), [EventoSaida::PrimeiroSom { .. }]),
+        "{ev:?}"
+    );
     f.tocar(FalaId(7), tom(300.0, 1_000), true);
     f.avancar(1_000);
-    assert_eq!(eventos(&mut rx), vec![EventoSaida::Esvaziou { fala: FalaId(7) }]);
+    assert_eq!(
+        eventos(&mut rx),
+        vec![EventoSaida::Esvaziou { fala: FalaId(7) }]
+    );
 }
 
 #[test]
@@ -82,7 +102,10 @@ fn calar_faz_fade_sem_estalo_e_limpa_o_buffer() {
     let g = f.gravado();
     // delta maximo entre amostras vizinhas: a senoide de 440 Hz a 0,5 de pico
     // varia no maximo 2*pi*440/48000*0,5 ~ 0,029 por amostra; o fade nao pode passar disso
-    let max_delta = g.windows(2).map(|w| (w[1] - w[0]).abs()).fold(0f32, f32::max);
+    let max_delta = g
+        .windows(2)
+        .map(|w| (w[1] - w[0]).abs())
+        .fold(0f32, f32::max);
     assert!(max_delta < 0.035, "estalo: delta {max_delta}");
     // termina em silencio e o buffer foi limpo
     assert!(g[g.len() - 100..].iter().all(|v| *v == 0.0));
@@ -91,7 +114,11 @@ fn calar_faz_fade_sem_estalo_e_limpa_o_buffer() {
     assert!(g[2_000 + 400..].iter().all(|v| *v == 0.0));
     assert!(g[2_000..2_000 + 384].iter().any(|v| v.abs() > 0.01));
     // calar descarta a fala: nada de Esvaziou
-    assert!(!eventos(&mut rx).iter().any(|e| matches!(e, EventoSaida::Esvaziou { .. })));
+    assert!(
+        !eventos(&mut rx)
+            .iter()
+            .any(|e| matches!(e, EventoSaida::Esvaziou { .. }))
+    );
     // e a saida continua utilizavel
     f.tocar(FalaId(2), tom(440.0, 480), true);
     f.avancar(960);
@@ -108,18 +135,33 @@ fn reconstrucao_preserva_o_buffer() {
     assert_eq!(antes, 38_000);
     let preservadas = f.reconstruir(44_100); // fone novo a 44,1 kHz
     let esperado = (38_000f64 * 44_100.0 / 48_000.0) as i64;
-    assert!((preservadas as i64 - esperado).abs() < 8, "{preservadas} vs {esperado}");
+    assert!(
+        (preservadas as i64 - esperado).abs() < 8,
+        "{preservadas} vs {esperado}"
+    );
     assert_eq!(f.pendentes() as usize, preservadas);
     eventos(&mut rx);
     // consome o resto na taxa nova: o Esvaziou sai uma unica vez e no fim
     let resto = f.avancar(preservadas - 1);
-    assert!(!eventos(&mut rx).iter().any(|e| matches!(e, EventoSaida::Esvaziou { .. })));
+    assert!(
+        !eventos(&mut rx)
+            .iter()
+            .any(|e| matches!(e, EventoSaida::Esvaziou { .. }))
+    );
     f.avancar(1);
     let ev = eventos(&mut rx);
-    assert_eq!(ev.iter().filter(|e| matches!(e, EventoSaida::Esvaziou { .. })).count(), 1);
+    assert_eq!(
+        ev.iter()
+            .filter(|e| matches!(e, EventoSaida::Esvaziou { .. }))
+            .count(),
+        1
+    );
     // o conteudo continua sendo a senoide de 440 Hz (agora a 44,1 kHz)
     let miolo = &resto[1_000..resto.len() - 1_000];
-    let cruz = miolo.windows(2).filter(|w| w[0] <= 0.0 && w[1] > 0.0).count();
+    let cruz = miolo
+        .windows(2)
+        .filter(|w| w[0] <= 0.0 && w[1] > 0.0)
+        .count();
     let freq = cruz as f64 / (miolo.len() as f64 / 44_100.0);
     assert!((freq - 440.0).abs() < 5.0, "freq {freq}");
 }

@@ -16,11 +16,18 @@ impl Pcm24k {
     pub const TAXA: u32 = 24_000;
 
     pub fn new(amostras: Vec<i16>) -> Self {
-        Self { amostras, taxa: Self::TAXA }
+        Self {
+            amostras,
+            taxa: Self::TAXA,
+        }
     }
 
     /// Duracao em segundos.
     pub fn duracao_s(&self) -> f64 {
-        if self.taxa == 0 { 0.0 } else { self.amostras.len() as f64 / f64::from(self.taxa) }
+        if self.taxa == 0 {
+            0.0
+        } else {
+            self.amostras.len() as f64 / f64::from(self.taxa)
+        }
     }
 }

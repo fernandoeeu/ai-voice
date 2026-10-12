@@ -5,7 +5,10 @@
 //!
 //! Regras do callback: sem alocar, sem esperar lock (so `try_lock`), sem log.
 
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering::{Acquire, Relaxed, Release}};
+use std::sync::atomic::{
+    AtomicU32, AtomicU64,
+    Ordering::{Acquire, Relaxed, Release},
+};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -55,7 +58,9 @@ pub struct Controle {
 impl Controle {
     /// Amostras escritas e ainda nao tocadas.
     pub fn pendentes(&self) -> u64 {
-        self.escritas.load(Acquire).saturating_sub(self.lidas.load(Acquire))
+        self.escritas
+            .load(Acquire)
+            .saturating_sub(self.lidas.load(Acquire))
     }
 }
 
@@ -135,7 +140,9 @@ impl Nucleo {
     /// desiste se um `calar` chegar no meio. Retorna `false` se desistiu.
     pub fn enfileirar(&self, fala: FalaId, pcm: &Pcm24k, ultimo: bool) -> bool {
         let pedidos_ini = self.ctl.pedidos.load(Acquire);
-        let Ok(mut p) = self.produtor.lock() else { return false };
+        let Ok(mut p) = self.produtor.lock() else {
+            return false;
+        };
         p.enfileirar(fala, pcm, ultimo, pedidos_ini)
     }
 
@@ -160,7 +167,9 @@ impl Nucleo {
     /// buffer para a taxa nova e reajusta as marcas. Com o stream parado.
     /// Retorna quantas amostras foram preservadas.
     pub fn reconstruir(&self, nova_taxa: u32, canais: usize) -> usize {
-        let (Ok(mut p), Ok(mut c)) = (self.produtor.lock(), self.consumidor.lock()) else { return 0 };
+        let (Ok(mut p), Ok(mut c)) = (self.produtor.lock(), self.consumidor.lock()) else {
+            return 0;
+        };
         c.canais = canais.max(1);
         let antiga = c.taxa;
         if antiga == nova_taxa {
@@ -213,19 +222,30 @@ impl Produtor {
     }
 
     fn enfileirar(&mut self, fala: FalaId, pcm: &Pcm24k, ultimo: bool, pedidos_ini: u64) -> bool {
-        let mono: Vec<f32> = pcm.amostras.iter().map(|&s| f32::from(s) / 32768.0).collect();
+        let mono: Vec<f32> = pcm
+            .amostras
+            .iter()
+            .map(|&s| f32::from(s) / 32768.0)
+            .collect();
         let saida = if pcm.taxa == self.taxa {
             mono
         } else {
             if self.reamostrador.as_ref().map(Reamostrador::taxas) != Some((pcm.taxa, self.taxa)) {
                 self.reamostrador = Some(Reamostrador::novo(pcm.taxa, self.taxa));
             }
-            self.reamostrador.as_mut().map(|r| r.processar(&mono)).unwrap_or_default()
+            self.reamostrador
+                .as_mut()
+                .map(|r| r.processar(&mono))
+                .unwrap_or_default()
         };
         let cancelado = |ctl: &Controle| ctl.pedidos.load(Acquire) != pedidos_ini;
 
         if !saida.is_empty() && self.fala_vista != Some(fala) {
-            let m = Marca { pos: self.escritas, fala, tipo: TipoMarca::Inicio };
+            let m = Marca {
+                pos: self.escritas,
+                fala,
+                tipo: TipoMarca::Inicio,
+            };
             if !self.empurrar_marca(m, pedidos_ini) {
                 return false;
             }
@@ -251,7 +271,11 @@ impl Produtor {
             self.ctl.escritas.store(self.escritas, Release);
         }
         if ultimo {
-            let m = Marca { pos: self.escritas, fala, tipo: TipoMarca::Fim };
+            let m = Marca {
+                pos: self.escritas,
+                fala,
+                tipo: TipoMarca::Fim,
+            };
             self.fala_vista = None;
             return self.empurrar_marca(m, pedidos_ini);
         }
@@ -332,7 +356,11 @@ impl Consumidor {
         self.emitir_marcas(hora_cb + latencia);
         for (f, frame) in saida.chunks_mut(canais).enumerate() {
             let hora = hora_cb + latencia + Duration::from_secs_f64(f as f64 / taxa);
-            let mut v = if self.fadando && self.fade_restante == 0 { None } else { self.amostras.pop().ok() };
+            let mut v = if self.fadando && self.fade_restante == 0 {
+                None
+            } else {
+                self.amostras.pop().ok()
+            };
             if let Some(s) = v.as_mut() {
                 self.lidas += 1;
                 if self.fadando {

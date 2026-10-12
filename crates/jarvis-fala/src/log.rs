@@ -17,7 +17,9 @@ pub(crate) struct Registro<'a> {
 }
 
 pub(crate) fn formatar(agora: SystemTime, pid: u32, r: &Registro<'_>) -> String {
-    let audio = r.audio_s.map_or_else(|| "?".to_owned(), |a| format!("{a:.1}"));
+    let audio = r
+        .audio_s
+        .map_or_else(|| "?".to_owned(), |a| format!("{a:.1}"));
     let ttfa = r.ttfa_ms.map_or_else(|| "?".to_owned(), |t| t.to_string());
     format!(
         "{} pid={pid} motor={} chars={} audio_s={audio} rc={} dur_s={} ttfa_ms={ttfa}",
@@ -33,7 +35,11 @@ pub(crate) fn anexar(caminho: &Path, linha: &str) {
     if let Some(pai) = caminho.parent() {
         let _ = std::fs::create_dir_all(pai);
     }
-    match std::fs::OpenOptions::new().create(true).append(true).open(caminho) {
+    match std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(caminho)
+    {
         Ok(mut f) => {
             let _ = writeln!(f, "{linha}");
         }
@@ -55,7 +61,12 @@ pub(crate) fn iso_utc(t: SystemTime) -> String {
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
     let a = yoe + era * 400 + i64::from(m <= 2);
-    format!("{a:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z", resto / 3600, resto % 3600 / 60, resto % 60)
+    format!(
+        "{a:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        resto / 3600,
+        resto % 3600 / 60,
+        resto % 60
+    )
 }
 
 #[cfg(test)]

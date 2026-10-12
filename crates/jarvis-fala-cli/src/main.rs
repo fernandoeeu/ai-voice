@@ -13,7 +13,9 @@ use std::process::{Command, exit};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
-use jarvis_protocolo::{CodigoErro, Esperar, Evento, Mensagem, Op, Requisicao, codificar, decodificar, rc};
+use jarvis_protocolo::{
+    CodigoErro, Esperar, Evento, Mensagem, Op, Requisicao, codificar, decodificar, rc,
+};
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
 
@@ -40,11 +42,17 @@ fn ler_args() -> Args {
         }
     }
     let mut it = pos.into_iter();
-    Args { texto: it.next(), voz: it.next(), modo }
+    Args {
+        texto: it.next(),
+        voz: it.next(),
+        modo,
+    }
 }
 
 fn home() -> PathBuf {
-    std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default()
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .unwrap_or_default()
 }
 
 fn env_nao_vazia(nome: &str) -> Option<String> {
@@ -61,7 +69,10 @@ fn fallback(texto: &str, voz: Option<&str>) -> ! {
         cmd.arg(v);
     }
     let erro = cmd.exec();
-    eprintln!("jarvis-fala-rs: exec de {} falhou: {erro}", legado.display());
+    eprintln!(
+        "jarvis-fala-rs: exec de {} falhou: {erro}",
+        legado.display()
+    );
     exit(rc::ERRO);
 }
 
@@ -145,7 +156,9 @@ fn main() {
                 exit(rc::ERRO);
             }
         }
-        let Ok(msg) = decodificar::<Mensagem>(&buf) else { continue };
+        let Ok(msg) = decodificar::<Mensagem>(&buf) else {
+            continue;
+        };
         match msg.ev {
             Evento::Aceito { .. } => {
                 aceito = true;
@@ -165,7 +178,11 @@ fn main() {
             Evento::Fim { rc, .. } => exit(rc),
             Evento::Erro { codigo, mensagem } => {
                 eprintln!("jarvis-fala-rs: {mensagem}");
-                exit(if codigo == CodigoErro::FilaEsgotou { rc::PRAZO_FILA } else { rc::ERRO });
+                exit(if codigo == CodigoErro::FilaEsgotou {
+                    rc::PRAZO_FILA
+                } else {
+                    rc::ERRO
+                });
             }
             _ => {}
         }

@@ -36,7 +36,10 @@ fn main() -> anyhow::Result<()> {
         };
         std::process::exit(rodar_guardiao(std::path::Path::new(&caminho)));
     }
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()?.block_on(servir())
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?
+        .block_on(servir())
 }
 
 async fn servir() -> anyhow::Result<()> {
@@ -53,8 +56,14 @@ async fn servir() -> anyhow::Result<()> {
     if let Some(pai) = lock.parent() {
         std::fs::create_dir_all(pai)?;
     }
-    let arq = std::fs::OpenOptions::new().create(true).append(true).open(log_dir.join("jarvisd.log"))?;
-    tracing_subscriber::fmt().with_writer(std::sync::Mutex::new(arq)).with_ansi(false).init();
+    let arq = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_dir.join("jarvisd.log"))?;
+    tracing_subscriber::fmt()
+        .with_writer(std::sync::Mutex::new(arq))
+        .with_ansi(false)
+        .init();
 
     let saida = match env("JARVISD_SAIDA").as_deref() {
         Some("fake") => SaidaDaemon::fake(),
@@ -66,10 +75,20 @@ async fn servir() -> anyhow::Result<()> {
     // O fala.log da POC nunca e o de producao.
     cfg.fala_log = log_dir.join("fala.log");
     let kokoro = KokoroHttp::new(tts)?;
-    let guardiao = GuardiaoProcesso::new(std::env::current_exe()?, vec!["--segurar-lock".into()], &lock);
+    let guardiao = GuardiaoProcesso::new(
+        std::env::current_exe()?,
+        vec!["--segurar-lock".into()],
+        &lock,
+    );
     let fila = Fila::iniciar(kokoro.clone(), saida.clone(), guardiao, cfg);
 
-    let ctx = Arc::new(servidor::Ctx { fila, kokoro, saida, manter, eventos: broadcast::channel(256).0 });
+    let ctx = Arc::new(servidor::Ctx {
+        fila,
+        kokoro,
+        saida,
+        manter,
+        eventos: broadcast::channel(256).0,
+    });
     let listener = servidor::ligar(&sock)?;
     tracing::info!(sock = %sock.display(), lock = %lock.display(), "jarvisd no ar");
 

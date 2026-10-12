@@ -40,7 +40,10 @@ pub struct AgenteInfo {
 #[serde(tag = "type")]
 pub enum Subscricao {
     #[serde(rename = "pane.agent_status_changed")]
-    StatusMudou { pane_id: String, agent_status: Option<StatusAgente> },
+    StatusMudou {
+        pane_id: String,
+        agent_status: Option<StatusAgente>,
+    },
 }
 
 /// Evento empurrado pelo herdr depois de `events.subscribe`.
@@ -59,5 +62,8 @@ pub trait Herdr: Send + Sync {
     fn teclas(&self, pane: &str, teclas: &[&str]) -> impl Future<Output = Result<()>> + Send;
     /// `agent.prompt`.
     fn prompt(&self, alvo: &str, texto: &str) -> impl Future<Output = Result<()>> + Send;
-    fn assinar(&self, subs: Vec<Subscricao>) -> impl Future<Output = Result<BoxStream<'static, Result<EventoHerdr>>>> + Send;
+    fn assinar(
+        &self,
+        subs: Vec<Subscricao>,
+    ) -> impl Future<Output = Result<BoxStream<'static, Result<EventoHerdr>>>> + Send;
 }

@@ -23,7 +23,9 @@ pub struct Config {
 
 impl Default for Config {
     fn default() -> Self {
-        let home = std::env::var_os("HOME").map(PathBuf::from).unwrap_or_default();
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
         Self {
             voz_padrao: "pf_dora".into(),
             vel_padrao: 1.0,

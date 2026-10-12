@@ -13,9 +13,18 @@ pub enum ErroWav {
     #[error("chunk data ausente")]
     SemData,
     #[error("formato nao suportado: tag {tag}, {canais} canal(is), {taxa} Hz, {bits} bits")]
-    Formato { tag: u16, canais: u16, taxa: u32, bits: u16 },
+    Formato {
+        tag: u16,
+        canais: u16,
+        taxa: u32,
+        bits: u16,
+    },
     #[error("WAV truncado: chunk {chunk} declara {declarado} bytes, so ha {presente}")]
-    Truncado { chunk: &'static str, declarado: usize, presente: usize },
+    Truncado {
+        chunk: &'static str,
+        declarado: usize,
+        presente: usize,
+    },
     #[error("tamanho de dados impar ({0})")]
     Impar(usize),
 }
@@ -44,12 +53,26 @@ pub fn decodificar(bytes: &[u8]) -> Result<Pcm24k, ErroWav> {
         let presente = bytes.len() - corpo;
         if id == b"fmt " {
             if tam < 16 || presente < 16 {
-                return Err(ErroWav::Truncado { chunk: "fmt", declarado: tam.max(16), presente });
+                return Err(ErroWav::Truncado {
+                    chunk: "fmt",
+                    declarado: tam.max(16),
+                    presente,
+                });
             }
             let f = &bytes[corpo..corpo + 16];
-            let (tag, canais, taxa, bits) = (u16_le(&f[0..2]), u16_le(&f[2..4]), u32_le(&f[4..8]), u16_le(&f[14..16]));
+            let (tag, canais, taxa, bits) = (
+                u16_le(&f[0..2]),
+                u16_le(&f[2..4]),
+                u32_le(&f[4..8]),
+                u16_le(&f[14..16]),
+            );
             if tag != 1 || canais != 1 || taxa != Pcm24k::TAXA || bits != 16 {
-                return Err(ErroWav::Formato { tag, canais, taxa, bits });
+                return Err(ErroWav::Formato {
+                    tag,
+                    canais,
+                    taxa,
+                    bits,
+                });
             }
             fmt_ok = true;
         } else if id == b"data" {
@@ -57,18 +80,31 @@ pub fn decodificar(bytes: &[u8]) -> Result<Pcm24k, ErroWav> {
                 return Err(ErroWav::SemFmt);
             }
             if presente < tam {
-                return Err(ErroWav::Truncado { chunk: "data", declarado: tam, presente });
+                return Err(ErroWav::Truncado {
+                    chunk: "data",
+                    declarado: tam,
+                    presente,
+                });
             }
             if !tam.is_multiple_of(2) {
                 return Err(ErroWav::Impar(tam));
             }
-            let amostras = bytes[corpo..corpo + tam].as_chunks::<2>().0.iter().map(|p| i16::from_le_bytes(*p)).collect();
+            let amostras = bytes[corpo..corpo + tam]
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|p| i16::from_le_bytes(*p))
+                .collect();
             return Ok(Pcm24k::new(amostras));
         }
         // Chunks sao alinhados em 2 bytes.
         pos = corpo.saturating_add(tam + (tam & 1));
     }
-    Err(if fmt_ok { ErroWav::SemData } else { ErroWav::SemFmt })
+    Err(if fmt_ok {
+        ErroWav::SemData
+    } else {
+        ErroWav::SemFmt
+    })
 }
 
 /// Monta um WAV s16le mono (uso em testes e fakes).
@@ -107,22 +143,40 @@ mod testes {
 
     #[test]
     fn rejeita_taxa_canais_bits() {
-        assert!(matches!(decodificar(&codificar(&[1, 2], 16_000)), Err(ErroWav::Formato { taxa: 16_000, .. })));
+        assert!(matches!(
+            decodificar(&codificar(&[1, 2], 16_000)),
+            Err(ErroWav::Formato { taxa: 16_000, .. })
+        ));
         let mut w = codificar(&[1, 2], 24_000);
         w[22] = 2; // estereo
-        assert!(matches!(decodificar(&w), Err(ErroWav::Formato { canais: 2, .. })));
+        assert!(matches!(
+            decodificar(&w),
+            Err(ErroWav::Formato { canais: 2, .. })
+        ));
         let mut w = codificar(&[1, 2], 24_000);
         w[34] = 8; // 8 bits
-        assert!(matches!(decodificar(&w), Err(ErroWav::Formato { bits: 8, .. })));
+        assert!(matches!(
+            decodificar(&w),
+            Err(ErroWav::Formato { bits: 8, .. })
+        ));
     }
 
     #[test]
     fn rejeita_truncado_e_lixo() {
         let w = codificar(&[1, 2, 3, 4], 24_000);
-        assert!(matches!(decodificar(&w[..w.len() - 3]), Err(ErroWav::Truncado { chunk: "data", .. })));
-        assert!(matches!(decodificar(&w[..20]), Err(ErroWav::SemFmt | ErroWav::Truncado { .. })));
+        assert!(matches!(
+            decodificar(&w[..w.len() - 3]),
+            Err(ErroWav::Truncado { chunk: "data", .. })
+        ));
+        assert!(matches!(
+            decodificar(&w[..20]),
+            Err(ErroWav::SemFmt | ErroWav::Truncado { .. })
+        ));
         assert!(matches!(decodificar(b"oi"), Err(ErroWav::Curto(2))));
-        assert_eq!(decodificar(b"RIFFxxxxWAVELIST\0\0\0\0"), Err(ErroWav::SemFmt));
+        assert_eq!(
+            decodificar(b"RIFFxxxxWAVELIST\0\0\0\0"),
+            Err(ErroWav::SemFmt)
+        );
         assert_eq!(decodificar(b"XXXXxxxxWAVEfmt "), Err(ErroWav::Cabecalho));
     }
 
@@ -133,6 +187,11 @@ mod testes {
         v.extend_from_slice(b"LIST\x03\x00\x00\x00abc\x00");
         v.extend_from_slice(&w[36..]);
         assert_eq!(decodificar(&v).unwrap().amostras, vec![7, 8]);
-        assert!(decodificar(&codificar(&[], 24_000)).unwrap().amostras.is_empty());
+        assert!(
+            decodificar(&codificar(&[], 24_000))
+                .unwrap()
+                .amostras
+                .is_empty()
+        );
     }
 }

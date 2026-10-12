@@ -36,7 +36,10 @@ pub fn ligar(caminho: &Path) -> anyhow::Result<UnixListener> {
                 std::fs::set_permissions(pai, std::fs::Permissions::from_mode(0o700))?;
             }
         } else {
-            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(pai)?;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(pai)?;
         }
     }
     if caminho.exists() {
@@ -73,7 +76,14 @@ fn enviar(tx: &Tx, id: Option<&str>, ev: Evento) {
 }
 
 fn erro(tx: &Tx, id: Option<&str>, msg: impl Into<String>) {
-    enviar(tx, id, Evento::Erro { codigo: CodigoErro::Protocolo, mensagem: msg.into() });
+    enviar(
+        tx,
+        id,
+        Evento::Erro {
+            codigo: CodigoErro::Protocolo,
+            mensagem: msg.into(),
+        },
+    );
 }
 
 async fn conexao(s: UnixStream, ctx: Arc<Ctx>) {
@@ -91,7 +101,11 @@ async fn conexao(s: UnixStream, ctx: Arc<Ctx>) {
     let mut buf = String::new();
     loop {
         buf.clear();
-        let n = match (&mut leitor).take(MAX_LINHA as u64 + 2).read_line(&mut buf).await {
+        let n = match (&mut leitor)
+            .take(MAX_LINHA as u64 + 2)
+            .read_line(&mut buf)
+            .await
+        {
             Ok(0) | Err(_) => break,
             Ok(n) => n,
         };
@@ -126,7 +140,9 @@ fn id_da_linha(linha: &str) -> Option<String> {
 
 async fn estado(ctx: &Ctx) -> Option<EstadoDaemon> {
     let e = ctx.fila.estado().await.ok()?;
-    let saudavel = tokio::time::timeout(Duration::from_secs(1), ctx.kokoro.saudavel()).await.unwrap_or(false);
+    let saudavel = tokio::time::timeout(Duration::from_secs(1), ctx.kokoro.saudavel())
+        .await
+        .unwrap_or(false);
     let (dispositivo, taxa) = ctx.saida.dispositivo();
     Some(EstadoDaemon {
         falando: e.falando,
@@ -172,7 +188,15 @@ async fn tratar(ctx: &Arc<Ctx>, tx: &Tx, desc: &watch::Receiver<bool>, req: Requ
                 }
             });
         }
-        Op::Falar { texto, voz, velocidade, origem, esperar, prazo_fila_s, cancelar_ao_desconectar } => {
+        Op::Falar {
+            texto,
+            voz,
+            velocidade,
+            origem,
+            esperar,
+            prazo_fila_s,
+            cancelar_ao_desconectar,
+        } => {
             let pedido = Pedido {
                 texto,
                 voz,

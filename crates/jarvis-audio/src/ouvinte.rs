@@ -14,8 +14,7 @@ mod imp {
         AudioObjectAddPropertyListener, AudioObjectGetPropertyData, AudioObjectID,
         AudioObjectPropertyAddress, AudioObjectRemovePropertyListener,
         kAudioDevicePropertyNominalSampleRate, kAudioHardwarePropertyDefaultOutputDevice,
-        kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal,
-        kAudioObjectSystemObject,
+        kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
     };
 
     const SISTEMA: AudioObjectID = kAudioObjectSystemObject as AudioObjectID;
@@ -83,7 +82,10 @@ mod imp {
                     dados as *mut c_void,
                 );
             }
-            let mut o = Self { dados, dispositivo_taxa: None };
+            let mut o = Self {
+                dados,
+                dispositivo_taxa: None,
+            };
             o.rearmar();
             o
         }

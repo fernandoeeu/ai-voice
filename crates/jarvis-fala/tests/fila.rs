@@ -13,7 +13,8 @@ use jarvis_lock::{Esgotou, GuardaLock, Guardiao};
 use jarvis_protocolo::Pcm24k;
 use tokio::sync::{broadcast, mpsc, watch};
 
-const TEXTO3: &str = "Primeira frase de teste aqui. Segunda frase de teste aqui. Terceira frase de teste aqui.";
+const TEXTO3: &str =
+    "Primeira frase de teste aqui. Segunda frase de teste aqui. Terceira frase de teste aqui.";
 
 // ---------- fakes ----------
 
@@ -34,19 +35,44 @@ impl FakeSint {
         self.0.falhas.lock().unwrap().push(trecho.into());
     }
     fn fim_de(&self, trecho: &str) -> Instant {
-        self.0.log.lock().unwrap().iter().find(|(f, _)| f.contains(trecho)).expect("sintese nao ocorreu").1
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(f, _)| f.contains(trecho))
+            .expect("sintese nao ocorreu")
+            .1
     }
 }
 impl Sintetizador for FakeSint {
     async fn sintetizar(&self, frase: &str, _voz: &str, _vel: f32) -> KResult<Pcm24k> {
-        let atraso = self.0.atrasos.lock().unwrap().iter().find(|(k, _)| frase.contains(k.as_str())).map(|(_, v)| *v);
+        let atraso = self
+            .0
+            .atrasos
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|(k, _)| frase.contains(k.as_str()))
+            .map(|(_, v)| *v);
         if let Some(d) = atraso {
             tokio::time::sleep(d).await;
         }
-        if self.0.falhas.lock().unwrap().iter().any(|k| frase.contains(k.as_str())) {
+        if self
+            .0
+            .falhas
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|k| frase.contains(k.as_str()))
+        {
             anyhow::bail!("kokoro falso falhou");
         }
-        self.0.log.lock().unwrap().push((frase.to_owned(), Instant::now()));
+        self.0
+            .log
+            .lock()
+            .unwrap()
+            .push((frase.to_owned(), Instant::now()));
         Ok(Pcm24k::new(vec![100; 2400])) // 0,1 s
     }
     async fn saudavel(&self) -> bool {
@@ -95,12 +121,16 @@ impl Saida for FakeSaida {
         }
         let primeiro = {
             let mut t = self.0.tocadas.lock().unwrap();
-            let primeiro = !t.iter().any(|(f, n, _, _)| *f == fala && *n > 0) && !pcm.amostras.is_empty();
+            let primeiro =
+                !t.iter().any(|(f, n, _, _)| *f == fala && *n > 0) && !pcm.amostras.is_empty();
             t.push((fala, pcm.amostras.len(), ultimo, Instant::now()));
             primeiro
         };
         if primeiro {
-            let _ = self.0.tx.send(EventoSaida::PrimeiroSom { fala, hora_saida: Instant::now() });
+            let _ = self.0.tx.send(EventoSaida::PrimeiroSom {
+                fala,
+                hora_saida: Instant::now(),
+            });
         }
         if ultimo && let Some(d) = *self.0.auto_esvaziar.lock().unwrap() {
             let (tx, ep, base) = (self.0.tx.clone(), self.0.epoca.load(SeqCst), self.0.clone());
@@ -163,7 +193,11 @@ struct Cena {
 
 fn dir_temp() -> PathBuf {
     static N: AtomicU32 = AtomicU32::new(0);
-    let d = std::env::temp_dir().join(format!("jfala-{}-{}", std::process::id(), N.fetch_add(1, SeqCst)));
+    let d = std::env::temp_dir().join(format!(
+        "jfala-{}-{}",
+        std::process::id(),
+        N.fetch_add(1, SeqCst)
+    ));
     let _ = std::fs::remove_dir_all(&d);
     std::fs::create_dir_all(&d).unwrap();
     d
@@ -172,18 +206,47 @@ fn dir_temp() -> PathBuf {
 fn cena(auto: Option<Duration>) -> Cena {
     let dir = dir_temp();
     let say = dir.join("say.sh");
-    std::fs::write(&say, format!("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > {}/say.args\n", dir.display())).unwrap();
-    std::process::Command::new("chmod").arg("755").arg(&say).status().unwrap();
-    let cfg = Config { say_exe: say, fala_log: dir.join("fala.log"), voz_mac: "Luciana".into(), ..Config::default() };
-    let (sint, saida, guard) = (FakeSint::default(), FakeSaida::novo(auto), FakeGuardiao::default());
+    std::fs::write(
+        &say,
+        format!(
+            "#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > {}/say.args\n",
+            dir.display()
+        ),
+    )
+    .unwrap();
+    std::process::Command::new("chmod")
+        .arg("755")
+        .arg(&say)
+        .status()
+        .unwrap();
+    let cfg = Config {
+        say_exe: say,
+        fala_log: dir.join("fala.log"),
+        voz_mac: "Luciana".into(),
+        ..Config::default()
+    };
+    let (sint, saida, guard) = (
+        FakeSint::default(),
+        FakeSaida::novo(auto),
+        FakeGuardiao::default(),
+    );
     let fila = Fila::iniciar(sint.clone(), saida.clone(), guard.clone(), cfg);
-    Cena { fila, sint, saida, guard, dir }
+    Cena {
+        fila,
+        sint,
+        saida,
+        guard,
+        dir,
+    }
 }
 
 async fn ate_fim(rx: &mut mpsc::UnboundedReceiver<Evento>) -> Vec<Evento> {
     let mut v = Vec::new();
     loop {
-        let e = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("timeout esperando fim").expect("canal fechou");
+        let e = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("timeout esperando fim")
+            .expect("canal fechou");
         let fim = matches!(e, Evento::Fim { .. });
         v.push(e);
         if fim {
@@ -215,19 +278,39 @@ async fn espera(mut cond: impl FnMut() -> bool) {
 async fn fifo_e_eventos() {
     let c = cena(Some(Duration::from_millis(20)));
     let (a, mut ra) = c.fila.falar(Pedido::novo(TEXTO3)).await.unwrap();
-    let (b, mut rb) = c.fila.falar(Pedido::novo("Outra fala curta.")).await.unwrap();
-    assert!(matches!(ra.recv().await, Some(Evento::Aceito { posicao: 0, .. })));
+    let (b, mut rb) = c
+        .fila
+        .falar(Pedido::novo("Outra fala curta."))
+        .await
+        .unwrap();
+    assert!(matches!(
+        ra.recv().await,
+        Some(Evento::Aceito { posicao: 0, .. })
+    ));
     let va = ate_fim(&mut ra).await;
     let vb = ate_fim(&mut rb).await;
     assert!(va.iter().any(|e| matches!(e, Evento::PrimeiroSom { .. })));
     assert_eq!(rc_de(&va), 0);
     assert_eq!(rc_de(&vb), 0);
-    let ordem: Vec<FalaId> = c.saida.0.tocadas.lock().unwrap().iter().map(|t| t.0).collect();
+    let ordem: Vec<FalaId> = c
+        .saida
+        .0
+        .tocadas
+        .lock()
+        .unwrap()
+        .iter()
+        .map(|t| t.0)
+        .collect();
     let ultima_a = ordem.iter().rposition(|f| *f == a).unwrap();
     let primeira_b = ordem.iter().position(|f| *f == b).unwrap();
     assert!(ultima_a < primeira_b, "FIFO violada: {ordem:?}");
     match va.last() {
-        Some(Evento::Fim { motor, audio_s, chars, .. }) => {
+        Some(Evento::Fim {
+            motor,
+            audio_s,
+            chars,
+            ..
+        }) => {
             assert_eq!(motor, "kokoro");
             assert!(*audio_s > 0.25);
             assert_eq!(*chars as usize, TEXTO3.chars().count());
@@ -243,7 +326,10 @@ async fn primeiro_som_antes_da_sintese_da_segunda_frase() {
     let (_, mut rx) = c.fila.falar(Pedido::novo(TEXTO3)).await.unwrap();
     assert_eq!(rc_de(&ate_fim(&mut rx).await), 0);
     let primeiro_tocar = c.saida.0.tocadas.lock().unwrap()[0].3;
-    assert!(primeiro_tocar < c.sint.fim_de("Segunda"), "tocou so depois de sintetizar a 2a frase");
+    assert!(
+        primeiro_tocar < c.sint.fim_de("Segunda"),
+        "tocou so depois de sintetizar a 2a frase"
+    );
 }
 
 #[tokio::test]
@@ -257,7 +343,10 @@ async fn lock_preso_entre_frases_e_entre_falas_e_solto_so_apos_esvaziou() {
     tokio::time::sleep(Duration::from_millis(100)).await;
     assert!(rb.try_recv().is_ok(), "B deveria ter so o Aceito");
     // Ultimo bloco entregue mas sem Esvaziou: nada de fim, lock preso.
-    assert!(ra.try_recv().is_ok_and(|e| matches!(e, Evento::Aceito { .. })));
+    assert!(
+        ra.try_recv()
+            .is_ok_and(|e| matches!(e, Evento::Aceito { .. }))
+    );
     while let Ok(e) = ra.try_recv() {
         assert!(!matches!(e, Evento::Fim { .. }), "fim antes do Esvaziou");
     }
@@ -308,18 +397,33 @@ async fn calar_atual_e_tudo() {
 #[tokio::test]
 async fn prazo_da_fila_esgotado_da_75() {
     let c = cena(None);
-    let (_, mut ra) = c.fila.falar(Pedido::novo("Fala que segura a fila.")).await.unwrap();
-    let pedido = Pedido { texto: "Vai vencer.".into(), prazo_fila: Some(Duration::from_millis(100)), ..Pedido::default() };
+    let (_, mut ra) = c
+        .fila
+        .falar(Pedido::novo("Fala que segura a fila."))
+        .await
+        .unwrap();
+    let pedido = Pedido {
+        texto: "Vai vencer.".into(),
+        prazo_fila: Some(Duration::from_millis(100)),
+        ..Pedido::default()
+    };
     let (_, mut rb) = c.fila.falar(pedido).await.unwrap();
     assert_eq!(rc_de(&ate_fim(&mut rb).await), 75);
-    assert!(ra.try_recv().is_ok_and(|e| matches!(e, Evento::Aceito { .. })));
+    assert!(
+        ra.try_recv()
+            .is_ok_and(|e| matches!(e, Evento::Aceito { .. }))
+    );
 }
 
 #[tokio::test]
 async fn prazo_do_lock_esgotado_da_75() {
     let c = cena(None);
     c.guard.0.nunca.store(true, SeqCst);
-    let pedido = Pedido { texto: "Sem lock.".into(), prazo_fila: Some(Duration::from_millis(100)), ..Pedido::default() };
+    let pedido = Pedido {
+        texto: "Sem lock.".into(),
+        prazo_fila: Some(Duration::from_millis(100)),
+        ..Pedido::default()
+    };
     let (_, mut rx) = c.fila.falar(pedido).await.unwrap();
     assert_eq!(rc_de(&ate_fim(&mut rx).await), 75);
 }
@@ -333,7 +437,10 @@ async fn kokoro_falha_na_primeira_frase_usa_say_no_texto_todo() {
     assert_eq!(rc_de(&v), 0);
     assert!(matches!(v.last(), Some(Evento::Fim { motor, .. }) if motor == "say"));
     let args = std::fs::read_to_string(c.dir.join("say.args")).unwrap();
-    assert_eq!(args.lines().collect::<Vec<_>>(), ["-v", "Luciana", "--", TEXTO3]);
+    assert_eq!(
+        args.lines().collect::<Vec<_>>(),
+        ["-v", "Luciana", "--", TEXTO3]
+    );
     assert_eq!(c.saida.n_tocadas(), 0);
 }
 
@@ -347,8 +454,20 @@ async fn kokoro_falha_no_meio_usa_say_so_no_resto() {
     assert!(matches!(v.last(), Some(Evento::Fim { motor, .. }) if motor == "kokoro+say"));
     let args = std::fs::read_to_string(c.dir.join("say.args")).unwrap();
     let texto = args.lines().last().unwrap().to_owned();
-    assert!(texto.starts_with("Segunda") && texto.contains("Terceira"), "resto errado: {texto}");
-    assert!(c.saida.0.tocadas.lock().unwrap().iter().any(|t| t.2 && t.1 == 0), "faltou o fechamento vazio");
+    assert!(
+        texto.starts_with("Segunda") && texto.contains("Terceira"),
+        "resto errado: {texto}"
+    );
+    assert!(
+        c.saida
+            .0
+            .tocadas
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|t| t.2 && t.1 == 0),
+        "faltou o fechamento vazio"
+    );
 }
 
 #[tokio::test]
@@ -361,12 +480,33 @@ async fn linha_do_fala_log() {
     let campos: Vec<&str> = linha.split(' ').collect();
     assert_eq!(campos.len(), 8, "{linha}");
     let ts = campos[0];
-    assert!(ts.len() == 20 && ts.ends_with('Z') && ts.as_bytes()[10] == b'T', "{ts}");
-    assert!(campos[1].strip_prefix("pid=").is_some_and(|p| p.parse::<u32>().is_ok()));
+    assert!(
+        ts.len() == 20 && ts.ends_with('Z') && ts.as_bytes()[10] == b'T',
+        "{ts}"
+    );
+    assert!(
+        campos[1]
+            .strip_prefix("pid=")
+            .is_some_and(|p| p.parse::<u32>().is_ok())
+    );
     assert_eq!(campos[2], "motor=kokoro");
     assert_eq!(campos[3], "chars=13");
-    assert!(campos[4].strip_prefix("audio_s=").is_some_and(|p| p.parse::<f64>().is_ok()), "{linha}");
+    assert!(
+        campos[4]
+            .strip_prefix("audio_s=")
+            .is_some_and(|p| p.parse::<f64>().is_ok()),
+        "{linha}"
+    );
     assert_eq!(campos[5], "rc=0");
-    assert!(campos[6].strip_prefix("dur_s=").is_some_and(|p| p.parse::<u64>().is_ok()));
-    assert!(campos[7].strip_prefix("ttfa_ms=").is_some_and(|p| p.parse::<u64>().is_ok()), "{linha}");
+    assert!(
+        campos[6]
+            .strip_prefix("dur_s=")
+            .is_some_and(|p| p.parse::<u64>().is_ok())
+    );
+    assert!(
+        campos[7]
+            .strip_prefix("ttfa_ms=")
+            .is_some_and(|p| p.parse::<u64>().is_ok()),
+        "{linha}"
+    );
 }

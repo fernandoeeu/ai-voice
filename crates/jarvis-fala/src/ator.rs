@@ -34,7 +34,10 @@ pub struct Pedido {
 
 impl Pedido {
     pub fn novo(texto: impl Into<String>) -> Self {
-        Self { texto: texto.into(), ..Self::default() }
+        Self {
+            texto: texto.into(),
+            ..Self::default()
+        }
     }
 }
 
@@ -53,7 +56,11 @@ pub struct Estado {
 pub struct FilaEncerrada;
 
 enum Comando {
-    Falar(Pedido, mpsc::UnboundedSender<Evento>, oneshot::Sender<FalaId>),
+    Falar(
+        Pedido,
+        mpsc::UnboundedSender<Evento>,
+        oneshot::Sender<FalaId>,
+    ),
     Calar(Escopo),
     Cancelar(FalaId),
     Estado(oneshot::Sender<Estado>),
@@ -76,7 +83,11 @@ impl Fila {
         let (tx, rx) = mpsc::channel(64);
         let (lock_tx, _) = watch::channel(false);
         let ator = Ator {
-            ctx: Ctx { synth: Arc::new(synth), saida: Arc::new(saida), cfg: Arc::new(cfg) },
+            ctx: Ctx {
+                synth: Arc::new(synth),
+                saida: Arc::new(saida),
+                cfg: Arc::new(cfg),
+            },
             guardiao: Arc::new(guardiao),
             rx,
             proximo_id: 1,
@@ -97,23 +108,35 @@ impl Fila {
     ) -> Result<(FalaId, mpsc::UnboundedReceiver<Evento>), FilaEncerrada> {
         let (ev_tx, ev_rx) = mpsc::unbounded_channel();
         let (id_tx, id_rx) = oneshot::channel();
-        self.tx.send(Comando::Falar(pedido, ev_tx, id_tx)).await.map_err(|_| FilaEncerrada)?;
+        self.tx
+            .send(Comando::Falar(pedido, ev_tx, id_tx))
+            .await
+            .map_err(|_| FilaEncerrada)?;
         Ok((id_rx.await.map_err(|_| FilaEncerrada)?, ev_rx))
     }
 
     /// `calar(atual)` ou `calar(tudo)`: as falas afetadas terminam com rc 143.
     pub async fn calar(&self, escopo: Escopo) -> Result<(), FilaEncerrada> {
-        self.tx.send(Comando::Calar(escopo)).await.map_err(|_| FilaEncerrada)
+        self.tx
+            .send(Comando::Calar(escopo))
+            .await
+            .map_err(|_| FilaEncerrada)
     }
 
     /// Cancela uma fala especifica (atual ou na fila) com rc 143.
     pub async fn cancelar(&self, id: FalaId) -> Result<(), FilaEncerrada> {
-        self.tx.send(Comando::Cancelar(id)).await.map_err(|_| FilaEncerrada)
+        self.tx
+            .send(Comando::Cancelar(id))
+            .await
+            .map_err(|_| FilaEncerrada)
     }
 
     pub async fn estado(&self) -> Result<Estado, FilaEncerrada> {
         let (tx, rx) = oneshot::channel();
-        self.tx.send(Comando::Estado(tx)).await.map_err(|_| FilaEncerrada)?;
+        self.tx
+            .send(Comando::Estado(tx))
+            .await
+            .map_err(|_| FilaEncerrada)?;
         rx.await.map_err(|_| FilaEncerrada)
     }
 }
@@ -222,14 +245,23 @@ where
             let entrada = Entrada {
                 id: item.id,
                 texto: item.pedido.texto.clone(),
-                voz: item.pedido.voz.clone().unwrap_or_else(|| cfg.voz_padrao.clone()),
+                voz: item
+                    .pedido
+                    .voz
+                    .clone()
+                    .unwrap_or_else(|| cfg.voz_padrao.clone()),
                 vel: item.pedido.vel.unwrap_or(cfg.vel_padrao),
                 lock: self.lock_tx.subscribe(),
                 prog: prog.clone(),
                 ev: item.ev.clone(),
             };
             let fut = Box::pin(executar(self.ctx.clone(), entrada));
-            self.atual = Some(Atual { item, prog, inicio: Instant::now(), fut });
+            self.atual = Some(Atual {
+                item,
+                prog,
+                inicio: Instant::now(),
+                fut,
+            });
             return;
         }
     }
@@ -244,7 +276,14 @@ where
                 let chars = pedido.texto.chars().count() as u32;
                 let _ = ev.send(Evento::Aceito { fala: id, posicao });
                 let _ = id_tx.send(id);
-                self.fila.push_back(Item { id, pedido, ev, enfileirada: Instant::now(), prazo, chars });
+                self.fila.push_back(Item {
+                    id,
+                    pedido,
+                    ev,
+                    enfileirada: Instant::now(),
+                    prazo,
+                    chars,
+                });
             }
             Comando::Calar(Escopo::Atual) => self.calar_atual().await,
             Comando::Calar(Escopo::Tudo) => {
@@ -315,8 +354,9 @@ where
     /// Falas na fila cujo prazo venceu.
     fn expirar(&mut self) {
         let agora = Instant::now();
-        let (vencidas, resto): (Vec<_>, Vec<_>) =
-            std::mem::take(&mut self.fila).into_iter().partition(|i| i.limite() <= agora);
+        let (vencidas, resto): (Vec<_>, Vec<_>) = std::mem::take(&mut self.fila)
+            .into_iter()
+            .partition(|i| i.limite() <= agora);
         self.fila = resto.into();
         for item in vencidas {
             self.fim(item, rc::PRAZO_FILA, None, agora);

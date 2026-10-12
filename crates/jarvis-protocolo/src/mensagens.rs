@@ -55,7 +55,11 @@ pub struct Requisicao {
 
 impl Requisicao {
     pub fn nova(id: impl Into<String>, op: Op) -> Self {
-        Self { v: VERSAO, id: id.into(), op }
+        Self {
+            v: VERSAO,
+            id: id.into(),
+            op,
+        }
     }
 }
 
@@ -115,10 +119,25 @@ impl std::str::FromStr for Manter {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "ev", rename_all = "snake_case")]
 pub enum Evento {
-    Aceito { fala: FalaId, posicao: u32 },
-    PrimeiroSom { fala: FalaId, ms: u64 },
-    Fim { fala: FalaId, rc: i32, motor: String, audio_s: f64, chars: u32 },
-    Erro { codigo: CodigoErro, mensagem: String },
+    Aceito {
+        fala: FalaId,
+        posicao: u32,
+    },
+    PrimeiroSom {
+        fala: FalaId,
+        ms: u64,
+    },
+    Fim {
+        fala: FalaId,
+        rc: i32,
+        motor: String,
+        audio_s: f64,
+        chars: u32,
+    },
+    Erro {
+        codigo: CodigoErro,
+        mensagem: String,
+    },
     Pong,
     Estado(EstadoDaemon),
 }

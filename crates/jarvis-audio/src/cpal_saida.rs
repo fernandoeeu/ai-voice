@@ -4,7 +4,10 @@
 //! dispositivo padrao ou a taxa mudam. O ring buffer vive no `Nucleo` e
 //! sobrevive as reconstrucoes.
 
-use std::sync::atomic::{AtomicBool, Ordering::{AcqRel, Relaxed}};
+use std::sync::atomic::{
+    AtomicBool,
+    Ordering::{AcqRel, Relaxed},
+};
 use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -42,7 +45,9 @@ impl CpalSaida {
             Ok(v) if !v.trim().is_empty() => v.parse::<Manter>()?,
             _ => Manter::Sempre,
         };
-        let dither = std::env::var("JARVISD_DITHER_DB").ok().and_then(|v| v.trim().parse::<f32>().ok());
+        let dither = std::env::var("JARVISD_DITHER_DB")
+            .ok()
+            .and_then(|v| v.trim().parse::<f32>().ok());
         Self::novo(manter, dither)
     }
 
@@ -70,8 +75,17 @@ impl CpalSaida {
             .name("jarvis-audio".into())
             .spawn(move || g.rodar(pronto_tx))
             .map_err(|e| e.to_string())?;
-        pronto_rx.recv_timeout(Duration::from_secs(10)).map_err(|e| e.to_string())??;
-        Ok(Self { nucleo, tx, cmd, manter, dispositivo, gerente: Some(gerente) })
+        pronto_rx
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|e| e.to_string())??;
+        Ok(Self {
+            nucleo,
+            tx,
+            cmd,
+            manter,
+            dispositivo,
+            gerente: Some(gerente),
+        })
     }
 
     pub fn manter(&self) -> Manter {
@@ -125,7 +139,11 @@ struct Gerente {
 
 impl Gerente {
     fn rodar(&mut self, pronto: mpsc::Sender<Result<(), String>>) {
-        let inicial = if self.manter == Manter::Sempre { self.abrir() } else { Ok(()) };
+        let inicial = if self.manter == Manter::Sempre {
+            self.abrir()
+        } else {
+            Ok(())
+        };
         let falhou = inicial.is_err();
         let _ = pronto.send(inicial);
         if falhou {
@@ -143,7 +161,9 @@ impl Gerente {
                 Err(RecvTimeoutError::Timeout) => {}
             }
             self.encaminhar_sinais();
-            if self.mudou.swap(false, AcqRel) && (self.stream.is_some() || self.manter == Manter::Sempre) {
+            if self.mudou.swap(false, AcqRel)
+                && (self.stream.is_some() || self.manter == Manter::Sempre)
+            {
                 self.stream = None;
                 self.abrir_ou_avisar();
             }
@@ -160,7 +180,10 @@ impl Gerente {
     }
 
     fn reabrir_com_pausa(&mut self) {
-        if self.ultimo_erro.is_none_or(|t| t.elapsed() > Duration::from_millis(500)) {
+        if self
+            .ultimo_erro
+            .is_none_or(|t| t.elapsed() > Duration::from_millis(500))
+        {
             self.abrir_ou_avisar();
         }
     }
@@ -183,14 +206,19 @@ impl Gerente {
             match s {
                 Sinal::PrimeiroSom { fala, hora } => {
                     self.fechar_em = None;
-                    let _ = self.tx.send(EventoSaida::PrimeiroSom { fala, hora_saida: hora });
+                    let _ = self.tx.send(EventoSaida::PrimeiroSom {
+                        fala,
+                        hora_saida: hora,
+                    });
                 }
                 Sinal::Esvaziou { fala } => {
                     let _ = self.tx.send(EventoSaida::Esvaziou { fala });
                     self.fechar_em = match self.manter {
                         Manter::Sempre => None,
                         Manter::Nunca => Some(Instant::now() + FOLGA_FECHAR),
-                        Manter::Janela(s) => Some(Instant::now() + FOLGA_FECHAR + Duration::from_secs(u64::from(s))),
+                        Manter::Janela(s) => {
+                            Some(Instant::now() + FOLGA_FECHAR + Duration::from_secs(u64::from(s)))
+                        }
                     };
                 }
             }
@@ -200,13 +228,21 @@ impl Gerente {
     fn abrir(&mut self) -> Result<(), String> {
         self.stream = None;
         let host = cpal::default_host();
-        let dev = host.default_output_device().ok_or("sem dispositivo de saida padrao")?;
+        let dev = host
+            .default_output_device()
+            .ok_or("sem dispositivo de saida padrao")?;
         let cfg = dev.default_output_config().map_err(|e| e.to_string())?;
         if cfg.sample_format() != cpal::SampleFormat::F32 {
-            return Err(format!("formato {:?} nao suportado (so f32)", cfg.sample_format()));
+            return Err(format!(
+                "formato {:?} nao suportado (so f32)",
+                cfg.sample_format()
+            ));
         }
         let (taxa, canais) = (cfg.sample_rate(), usize::from(cfg.channels()));
-        let nome = dev.description().map(|d| d.name().to_string()).unwrap_or_else(|_| "?".into());
+        let nome = dev
+            .description()
+            .map(|d| d.name().to_string())
+            .unwrap_or_else(|_| "?".into());
         // Stream ainda nao existe: sem corrida com o callback.
         self.nucleo.reconstruir(taxa, canais);
         let n = self.nucleo.clone();
@@ -227,7 +263,11 @@ impl Gerente {
         self.stream = Some(stream);
         self.ouvintes.rearmar();
         let novo = (nome.clone(), taxa);
-        let mudou = self.dispositivo.lock().map(|mut d| d.replace(novo.clone()) != Some(novo)).unwrap_or(true);
+        let mudou = self
+            .dispositivo
+            .lock()
+            .map(|mut d| d.replace(novo.clone()) != Some(novo))
+            .unwrap_or(true);
         if mudou {
             let _ = self.tx.send(EventoSaida::DispositivoMudou { nome, taxa });
         }
