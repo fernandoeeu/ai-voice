@@ -17,12 +17,42 @@ export type Servico = {
 	readonly vivo: boolean;
 	readonly pid: number | null;
 	readonly reinicios: number | null;
+	/** Run by launchd on a schedule (StartInterval/StartCalendarInterval): no PID between runs is normal. */
+	readonly periodico?: boolean;
+	/** Seconds between runs, for StartInterval; null when unknown or calendar-based. */
+	readonly intervaloS?: number | null;
+	/** launchd's runs: how many times it started the service. */
+	readonly execucoes?: number | null;
+	/** Last known run of a periodic service (ms since epoch). */
+	readonly ultimaExecucao?: number | null;
+	/** Last exit status as launchd reports it ("0", "-9", "(never exited)"…). */
+	readonly ultimaSaida?: string | null;
 	readonly ramBytes: number | null;
 	readonly cpuPct: number | null;
 	/** Health check answered (HTTP 200), when the service has one. */
 	readonly httpOk: boolean | null;
 	readonly healthMs: number | null;
 };
+
+/** First integer of launchd's exit status ("0", "-9", "75: EX_TEMPFAIL"); null when it never exited. */
+export function codigoSaida(s: string | null | undefined): number | null {
+	const m = /^\s*(-?\d+)/.exec(s ?? '');
+	return m ? Number(m[1]) : null;
+}
+
+export type SaudePeriodico = 'rodando' | 'agendado' | 'falhou' | 'atrasado';
+
+/**
+ * A periodic service is healthy between runs: alert only when the last run exited non-zero, or when the last run is
+ * older than three intervals.
+ */
+export function saudePeriodico(s: Servico, agora: number): SaudePeriodico {
+	if (s.vivo) return 'rodando';
+	const codigo = codigoSaida(s.ultimaSaida);
+	if (codigo !== null && codigo !== 0) return 'falhou';
+	if (s.intervaloS && s.ultimaExecucao != null && agora - s.ultimaExecucao > 3 * s.intervaloS * 1000) return 'atrasado';
+	return 'agendado';
+}
 
 export type AgenteEstado = 'working' | 'blocked' | 'idle' | 'done' | 'unknown';
 
@@ -201,13 +231,19 @@ function servico(o: Obj): Servico | null {
 	const pid = num(pick(o, ['pid']));
 	const carregado = bool(pick(o, ['carregado', 'loaded']));
 	const vivo = bool(pick(o, ['vivo', 'alive', 'up', 'rodando', 'running', 'estado', 'state'])) ?? pid !== null;
+	const periodico = bool(pick(o, ['periodico', 'periodic'])) ?? false;
 	return {
 		carregado,
 		nome: nome.replace(/^dev\.jarvis\./, ''),
 		label: label ?? (nome.startsWith('dev.jarvis.') ? nome : `dev.jarvis.${nome}`),
 		vivo,
 		pid,
-		reinicios: num(pick(o, ['reinicios', 'restarts', 'execucoes', 'runs'])),
+		reinicios: num(pick(o, ['reinicios', 'restarts'])) ?? (periodico ? null : num(pick(o, ['execucoes', 'runs']))),
+		periodico,
+		intervaloS: num(pick(o, ['intervalo_s', 'intervaloS', 'interval_s'])),
+		execucoes: num(pick(o, ['execucoes', 'runs'])),
+		ultimaExecucao: instant(pick(o, ['ultima_execucao_em', 'ultimaExecucao', 'last_run'])),
+		ultimaSaida: str(pick(o, ['ultima_saida', 'ultimaSaida', 'last_exit'])),
 		ramBytes: ram(o),
 		cpuPct: num(pick(o, CPU)),
 		httpOk: bool(pick(o, ['httpOk', 'http_ok', 'saudavel', 'healthy'])),

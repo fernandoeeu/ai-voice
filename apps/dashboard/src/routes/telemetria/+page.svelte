@@ -11,7 +11,7 @@
 	import ServicosSaude from '#lib/components/telemetria/servicos-saude.svelte';
 	import { Button } from '#lib/components/ui/button/index.js';
 	import { count, duration } from '#lib/conversa/format.js';
-	import type { Painel } from '#lib/telemetria/model.js';
+	import { saudePeriodico, type Painel } from '#lib/telemetria/model.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
@@ -37,7 +37,8 @@
 
 	const estado = $derived(painel.estado);
 	const servicos = $derived(estado?.servicos.length ? estado.servicos : painel.servicosProm);
-	const vivos = $derived(servicos.filter((s) => s.vivo).length);
+	// A periodic service between healthy runs counts as up: it has no process by design.
+	const vivos = $derived(servicos.filter((s) => s.vivo || (s.periodico && saudePeriodico(s, now) === 'agendado')).length);
 	const atencao = $derived((estado?.herdr?.agentes ?? []).filter((a) => a.estado === 'blocked').length);
 	const entrega = $derived(painel.latencias.find((l) => l.id === 'escuta-entrega')?.p50 ?? estado?.escuta?.entregaMs?.p50 ?? null);
 	const aoVivo = $derived(connection === 'ao-vivo' && painel.coletor === 'ok');
@@ -90,7 +91,7 @@
 		</Notice>
 	{/if}
 
-	<ServicosSaude {servicos} fonte={estado?.servicos.length ? 'ao-vivo' : 'prometheus'} />
+	<ServicosSaude {servicos} {now} fonte={estado?.servicos.length ? 'ao-vivo' : 'prometheus'} />
 
 	<div class="grid items-start gap-x-10 gap-y-8 lg:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)] xl:gap-x-12">
 		<div class="grid min-w-0 gap-8">
