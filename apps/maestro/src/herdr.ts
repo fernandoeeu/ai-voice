@@ -180,6 +180,8 @@ export const getPane = (paneId: string) =>
 export const startClaude = (options: { name: string; pane: string; args: ReadonlyArray<string> }) =>
   Effect.gen(function*() {
     const herdr = yield* Herdr
+    // O rótulo do pane é do herdr: o claude reescreve o título OSC, o rótulo não.
+    yield* herdr.call(["pane", "rename", options.pane, options.name])
     yield* herdr.call(
       ["agent", "start", options.name, "--kind", "claude", "--pane", options.pane, "--timeout", "90000", "--", ...options.args],
       Duration.seconds(100)
