@@ -37,7 +37,7 @@ public enum Endpoint {
         "tipo", "quando", "se", "como", "onde", "qual", "quais", "quem", "com", "sem", "de", "do", "da", "dos", "das",
         "no", "na", "nos", "nas", "em", "o", "a", "os", "as", "um", "uma", "uns", "umas", "ao", "aos", "à", "às",
         "pelo", "pela", "sobre", "até", "ate", "também", "tambem", "enquanto", "caso", "meu", "minha", "seu", "sua",
-        "hum", "ahn", "éh", "jarvis", "camarada",
+        "tá", "não", "nao", "hum", "ahn", "éh", "jarvis", "camarada",
     ]
 
     /// A frase termina aberta: conectivo no fim, vírgula, dois-pontos, travessão ou reticências.
@@ -53,6 +53,24 @@ public enum Endpoint {
             .filter { !$0.isEmpty }
         guard let w = words.last else { return false }
         return openWords.contains(w)
+    }
+
+    /// A fala tem ao menos uma letra; só "." ou vazio vem de ruído e é descartada.
+    public static func hasLetters(_ text: String) -> Bool {
+        text.contains { $0.isLetter }
+    }
+
+    /// Fala que provavelmente continua: não termina em . ? ! ou termina aberta (palavra aberta, vírgula).
+    /// Com VAD, fica retida até a janela de junção passar, para a próxima fala colar nela.
+    public static func shouldHold(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let last = t.last else { return false }
+        return endsOpen(t) || !".?!".contains(last)
+    }
+
+    /// A nova fala começa a menos de `window` s da anterior retida: as duas viram uma só.
+    public static func shouldMerge(previous: String, gap: Double, window: Double) -> Bool {
+        shouldHold(previous) && gap >= 0 && gap < window
     }
 
     /// - Parameters:

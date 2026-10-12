@@ -305,6 +305,7 @@ final class Escuta: ObservableObject {
     @MainActor
     private func finishFileRun() {
         if !(segments.isEmpty && livePartial.isEmpty) { flush(reason: "fim do arquivo") }
+        releaseHeld()
         router.q.async {
             DispatchQueue.main.async {
                 emit(["type": "stopped", "reason": "fim do arquivo"])
@@ -382,6 +383,7 @@ final class Escuta: ObservableObject {
         if (utteranceStart != nil || voiceWithoutText) && now < s.deadline { return }
         exiting = true
         if !(segments.isEmpty && livePartial.isEmpty) { flush(reason: "encerramento") }
+        releaseHeld()
         let waited = Int(now.timeIntervalSince(s.since) * 1000)
         // O envio ao herdr roda na fila do roteador: sai depois dele.
         router.q.async {
@@ -662,7 +664,7 @@ final class Escuta: ObservableObject {
     /// e reconhecedor travado). A janela do Jarvis vence pelo tick marcado no armedUntil.
     private var tickTimer: Timer?
     private var tickFast = false
-    private var tickBusy: Bool { utteranceStart != nil || stopping != nil }
+    private var tickBusy: Bool { utteranceStart != nil || stopping != nil || held != nil }
 
     private func scheduleTick() {
         tickTimer?.invalidate()
@@ -730,11 +732,12 @@ final class Escuta: ObservableObject {
                     finalizeDone = true
                 }
             case .close(let reason):
-                flush(reason: reason)
+                flush(reason: reason, allowHold: recognizer.hasVAD)
             }
             checkShutdown()
             return
         }
+        releaseHeldIfExpired(now)
         checkShutdown()
         guard audioStartedAt != nil, !gate.paused else { return }
         // Ninguém falando: troca preventiva da tarefa de reconhecimento, ou troca porque ela parou de responder.
@@ -748,20 +751,62 @@ final class Escuta: ObservableObject {
         }
     }
 
+    /// Fala retida à espera de uma continuação (só com VAD): ver Endpoint.shouldHold.
+    private struct Held { var text: String; var began: Date; var overlapped: Bool; var reason: String; var at: Date }
+    private var held: Held?
+
+    @MainActor
+    private func releaseHeldIfExpired(_ now: Date) {
+        guard let h = held, now.timeIntervalSince(h.at) >= Self.mergeWindow else { return }
+        // Fala nova que começou dentro da janela ainda pode colar: espera ela terminar.
+        if let s = utteranceStart, s.timeIntervalSince(h.at) < Self.mergeWindow { return }
+        releaseHeld()
+    }
+
+    @MainActor
+    private func releaseHeld() {
+        guard let h = held else { return }
+        held = nil
+        deliver(text: h.text, began: h.began, wasOverlapped: h.overlapped, reason: h.reason)
+    }
+
     /// Fim da fala: junta tudo e manda UMA mensagem.
     @MainActor
-    private func flush(reason: String) {
-        let text = whole.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func flush(reason: String, allowHold: Bool = false) {
+        var text = whole.trimmingCharacters(in: .whitespacesAndNewlines)
         flushedVolatile = livePartial.isEmpty ? nil : (livePartial, Date())
-        let began = utteranceStart ?? Date()
-        let duration = Date().timeIntervalSince(began)
+        var began = utteranceStart ?? Date()
         segments = []; livePartial = ""; lastWhole = ""; utteranceStart = nil; partial = ""
         finalizeAt = nil
         capturing = false
-        let wasOverlapped = overlapped
+        var wasOverlapped = overlapped
         overlapped = false
         defer { segConfidences = []; liveConfidence = nil; voiceInUtterance = false }
-        guard !text.isEmpty else { return }
+        guard Endpoint.hasLetters(text) else {
+            if text.isEmpty { return }
+            emit(["type": "discarded", "text": text, "end": reason, "audio_s": audioSeconds])
+            return
+        }
+        if let h = held {
+            if Endpoint.shouldMerge(previous: h.text, gap: began.timeIntervalSince(h.at), window: Self.mergeWindow) {
+                text = h.text + " " + text
+                began = h.began
+                wasOverlapped = wasOverlapped || h.overlapped
+                held = nil
+            } else {
+                releaseHeld()
+            }
+        }
+        if allowHold, Endpoint.shouldHold(text) {
+            held = Held(text: text, began: began, overlapped: wasOverlapped, reason: reason, at: Date())
+            return
+        }
+        deliver(text: text, began: began, wasOverlapped: wasOverlapped, reason: reason)
+    }
+
+    @MainActor
+    private func deliver(text: String, began: Date, wasOverlapped: Bool, reason: String) {
+        let duration = Date().timeIntervalSince(began)
         let d = decide(text, startedAt: began, overlapped: wasOverlapped)
         if d.wake != nil { lastWakeAt = Date() }
         if d.arm {
