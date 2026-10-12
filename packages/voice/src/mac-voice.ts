@@ -1,12 +1,13 @@
-import { Clock, Context, Duration, Effect, FileSystem, Layer, Metric, Option, Path, Schema, SchemaTransformation } from "effect"
+import { Clock, Context, Duration, Effect, Exit, FileSystem, Layer, Metric, Option, Path, Schema, SchemaTransformation } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
-import { MacVoiceConfig } from "./mac-voice-config.ts"
+import { MacVoiceConfig, type TtsRecovery } from "./mac-voice-config.ts"
 import { MacVoiceError } from "./mac-voice-error.ts"
 
 export const LOCKF = "/usr/bin/lockf"
 export const SAY = "/usr/bin/say"
 export const AFPLAY = "/usr/bin/afplay"
+export const LAUNCHCTL = "/bin/launchctl"
 /**
  * Longest wait for the lock while another program speaks (`lockf -t`). When it expires nothing
  * was spoken and lockf exits with EX_TEMPFAIL, reported as "Mac ocupado".
@@ -23,6 +24,9 @@ export const speechTimeout = (text: string): Duration.Duration =>
   Duration.sum(QUEUE_TIMEOUT, Duration.sum(PLAYBACK_MARGIN, Duration.times(PLAYBACK_PER_CHARACTER, text.length)))
 /** The TTS server gets one attempt of this long; after that the speech falls back to `say`. */
 export const SYNTHESIS_TIMEOUT = Duration.seconds(10)
+/** One `/health` probe before deciding the server is down. */
+const HEALTH_TIMEOUT = Duration.seconds(2)
+const HEALTH_POLL = Duration.seconds(1)
 // SIGTERM first; a process that ignores it is SIGKILLed after this grace period.
 const FORCE_KILL_AFTER = Duration.seconds(2)
 // lockf(1) exit status when the timeout expires before the lock is free (sysexits EX_TEMPFAIL).
@@ -184,6 +188,66 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
       yield* play(locked([AFPLAY, file]), AFPLAY, text)
     }))
 
+  const healthy: Effect.Effect<boolean> = client.execute(
+    HttpClientRequest.get(`${config.ttsUrl}/health`).pipe(HttpClientRequest.accept("application/json"))
+  ).pipe(
+    Effect.provideService(FetchHttpClient.RequestInit, { redirect: "manual" }),
+    Effect.provideService(HttpClient.TracerPropagationEnabled, false),
+    Effect.map((response) => response.status >= 200 && response.status < 300),
+    Effect.timeoutOrElse({ duration: HEALTH_TIMEOUT, orElse: () => Effect.succeed(false) }),
+    Effect.catch(() => Effect.succeed(false))
+  )
+
+  const launchctl = (args: ReadonlyArray<string>) =>
+    spawner.exitCode(ChildProcess.make(LAUNCHCTL, args, {
+      stdin: "ignore",
+      stdout: "ignore",
+      stderr: "ignore",
+      forceKillAfter: FORCE_KILL_AFTER
+    })).pipe(Effect.catch(() => Effect.succeed(ChildProcessSpawner.ExitCode(1))))
+
+  /**
+   * Same steps as `sobe_servidor` in fala-kokoro.sh: kickstart the LaunchAgent if it is loaded,
+   * otherwise bootstrap its plist, then wait for `/health` up to `waitSeconds`. True when the
+   * server answers.
+   */
+  const startServer = Effect.fn("MacVoice.startServer")(function*(recovery: TtsRecovery) {
+    const domain = `gui/${recovery.uid}`
+    const target = `${domain}/${recovery.label}`
+    const loaded = (yield* launchctl(["print", target])) === 0
+    if (loaded) {
+      yield* launchctl(["kickstart", target])
+    } else if (yield* fs.exists(recovery.plist).pipe(Effect.orElseSucceed(() => false))) {
+      yield* launchctl(["bootstrap", domain, recovery.plist])
+    } else {
+      return false
+    }
+    for (let i = 0; i < recovery.waitSeconds; i++) {
+      if (yield* healthy) return true
+      yield* Effect.sleep(HEALTH_POLL)
+    }
+    return false
+  })
+
+  /** Appends one line in the fala-kokoro.sh format (plus `motivo` when `say` replaced Kokoro). Never fails. */
+  const record = (line: {
+    readonly motor: string
+    readonly chars: number
+    readonly audioSeconds: number | "?"
+    readonly rc: number
+    readonly start: number
+    readonly motivo?: string | undefined
+  }) =>
+    config.falaLog === undefined ? Effect.void : Effect.gen(function*() {
+      const now = yield* Clock.currentTimeMillis
+      const text = `${new Date(now).toISOString().replace(/\.\d+Z$/u, "Z")} pid=${process.pid} motor=${line.motor} ` +
+        `chars=${line.chars} audio_s=${line.audioSeconds} rc=${line.rc} dur_s=${Math.floor((now - line.start) / 1000)}` +
+        `${line.motivo === undefined ? "" : ` motivo=${line.motivo}`}\n`
+      const file = config.falaLog!
+      yield* fs.makeDirectory(path.dirname(file), { recursive: true })
+      yield* fs.writeFileString(file, text, { flag: "a" })
+    }).pipe(Effect.ignore)
+
   const speak = Effect.fn("MacVoice.speak")(function*(input: string) {
     const text = yield* decode(input).pipe(
       Effect.mapError(() =>
@@ -196,15 +260,42 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
     )
     // Synthesis runs before taking the lock, so the lock is held only while audio plays.
     const start = yield* Clock.currentTimeMillis
-    const wav = yield* synthesize(text)
+    let wav: Option.Option<Uint8Array> = yield* synthesize(text)
+    let motivo: string | undefined
+    if (Option.isNone(wav)) {
+      motivo = "tts_falhou"
+      const recovery = config.ttsRecovery
+      // Server down (not just slow or erroring): start the LaunchAgent and try Kokoro once more.
+      if (recovery !== undefined && !(yield* healthy)) {
+        if (yield* startServer(recovery)) {
+          wav = yield* synthesize(text)
+          if (Option.isNone(wav)) motivo = "tts_falhou_apos_subir"
+        } else {
+          motivo = "tts_nao_subiu"
+        }
+      }
+    }
     const motor = Option.isSome(wav) ? "kokoro" : "say"
+    if (Option.isSome(wav)) motivo = undefined
     yield* Effect.annotateCurrentSpan({ "jarvis.voz.motor": motor, "jarvis.voz.caracteres": text.length })
     // The player starts right after synthesis, unless another speech holds the lock.
     yield* Metric.update(Metric.withAttributes(timeToAudio, { motor }), (yield* Clock.currentTimeMillis) - start)
-    yield* Option.match(wav, {
-      onSome: (bytes) => playWav(bytes, text),
-      onNone: () => play(sayCommand(text), SAY, text)
-    })
+    const audioSeconds = Option.isSome(wav) ? Math.floor((wav.value.length - WAV_HEADER_LENGTH) / 48000) : "?"
+    const playback: Effect.Effect<void, MacVoiceError> = Option.isSome(wav)
+      ? playWav(wav.value, text)
+      : play(sayCommand(text), SAY, text)
+    yield* playback.pipe(
+      Effect.onExit((exit) =>
+        record({
+          motor,
+          chars: text.length,
+          audioSeconds,
+          rc: Exit.isSuccess(exit) ? 0 : Exit.hasInterrupts(exit) ? 143 : 1,
+          start,
+          motivo
+        })
+      )
+    )
     yield* Metric.update(Metric.withAttributes(speechDuration, { motor }), (yield* Clock.currentTimeMillis) - start)
     return { status: "accepted", device: MAC_DEVICE, chunks: 1, playbackConfirmed: true } satisfies MacSpeechPlayed
   })

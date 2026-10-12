@@ -4,7 +4,7 @@ import { PlatformError, SystemError } from "effect/PlatformError"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
-import { AFPLAY, LOCKF, MacVoice, MacVoiceConfig, QUEUE_TIMEOUT, SAY, speechTimeout, SYNTHESIS_TIMEOUT } from "../src/index.ts"
+import { AFPLAY, LAUNCHCTL, LOCKF, MacVoice, MacVoiceConfig, QUEUE_TIMEOUT, SAY, speechTimeout, SYNTHESIS_TIMEOUT } from "../src/index.ts"
 
 interface Reply {
   readonly exitCode?: number
@@ -12,10 +12,20 @@ interface Reply {
   readonly spawnFails?: boolean
   /** How the fake TTS server answers. Defaults to "down", so these tests take the `say` path. */
   readonly tts?: "down" | "hang" | "wav" | "http500" | "notWav"
+  /** Exit code of `launchctl print` (0 = agent loaded). Other launchctl calls exit 0. */
+  readonly launchctlPrint?: number
+  /** The server comes up after this many launchctl start calls (kickstart/bootstrap): "wav" from then on. */
+  readonly upAfterStart?: boolean
+  /** Seconds after the start call at which /health begins to answer (default 1). */
+  readonly healthyAfterS?: number
+  readonly plistExists?: boolean
+  readonly recovery?: boolean
 }
 
 const LOCK = "/state/jarvis/fala.lock"
 const TTS_URL = "http://127.0.0.1:7349"
+const PLIST = "/home/Library/LaunchAgents/dev.jarvis.tts.plist"
+const FALA_LOG = "/state/jarvis/tts/logs/fala.log"
 const WAV_FILE = "/tmp/jarvis-tts-1.wav"
 const WAV = new Uint8Array([...new TextEncoder().encode("RIFF"), ...new Array(60).fill(0)])
 
@@ -23,7 +33,8 @@ const WAV = new Uint8Array([...new TextEncoder().encode("RIFF"), ...new Array(60
 const fakeSpawner = (reply: Reply = {}) => {
   const commands: Array<ChildProcess.StandardCommand> = []
   const directories: Array<string> = []
-  const state = { released: 0 }
+  const state = { released: 0, started: 0, healthSeen: 0 }
+  const log: Array<string> = []
   const spawner = ChildProcessSpawner.make((command) =>
     reply.spawnFails === true
       ? Effect.fail(new PlatformError(new SystemError({ _tag: "NotFound", module: "ChildProcess", method: "spawn" })))
@@ -31,11 +42,16 @@ const fakeSpawner = (reply: Reply = {}) => {
         Effect.sync(() => {
           if (!ChildProcess.isStandardCommand(command)) throw new Error("unexpected piped command")
           commands.push(command)
+          const isLaunchctl = command.command === "/bin/launchctl"
+          if (isLaunchctl && (command.args[0] === "kickstart" || command.args[0] === "bootstrap")) {
+            state.started++
+          }
+          const launchctlCode = isLaunchctl && command.args[0] === "print" ? (reply.launchctlPrint ?? 0) : 0
           return ChildProcessSpawner.makeHandle({
             pid: ChildProcessSpawner.ProcessId(1),
             exitCode: reply.hang === true
               ? Effect.never
-              : Effect.succeed(ChildProcessSpawner.ExitCode(reply.exitCode ?? 0)),
+              : Effect.succeed(ChildProcessSpawner.ExitCode(isLaunchctl ? launchctlCode : reply.exitCode ?? 0)),
             isRunning: Effect.succeed(reply.hang === true),
             kill: () => Effect.void,
             stdin: Sink.drain,
@@ -56,7 +72,14 @@ const fakeSpawner = (reply: Reply = {}) => {
     Effect.gen(function*() {
       const body = request.body._tag === "Uint8Array" ? JSON.parse(new TextDecoder().decode(request.body.body)) : null
       requests.push({ url: url.toString(), body })
-      switch (reply.tts ?? "down") {
+      const up = reply.upAfterStart === true && state.started > 0 && state.healthSeen >= (reply.healthyAfterS ?? 1)
+      if (url.pathname === "/health") {
+        if (state.started > 0) state.healthSeen++
+        if (!up && (reply.tts === "http500" || reply.tts === "notWav")) {
+          return HttpClientResponse.fromWeb(request, new Response("{}", { status: 200 }))
+        }
+      }
+      switch (up ? "wav" : (reply.tts ?? "down")) {
         case "down":
           return yield* Effect.fail(
             new HttpClientError.HttpClientError({
@@ -77,6 +100,8 @@ const fakeSpawner = (reply: Reply = {}) => {
   const written: Array<{ readonly path: string; readonly bytes: Uint8Array }> = []
   const removed: Array<string> = []
   const fs = FileSystem.layerNoop({
+    exists: () => Effect.succeed(reply.plistExists ?? true),
+    writeFileString: (path, data) => Effect.sync(() => void log.push(`${path}\n${data}`)),
     makeDirectory: (path) => Effect.sync(() => void directories.push(path)),
     makeTempFileScoped: () =>
       Effect.acquireRelease(Effect.succeed(WAV_FILE), (path) => Effect.sync(() => void removed.push(path))),
@@ -87,14 +112,25 @@ const fakeSpawner = (reply: Reply = {}) => {
       Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Layer.succeed(
         MacVoiceConfig,
-        MacVoiceConfig.of({ voice: "Luciana", lock: LOCK, ttsUrl: TTS_URL, ttsVoice: "pf_dora" })
+        MacVoiceConfig.of({
+          voice: "Luciana",
+          lock: LOCK,
+          ttsUrl: TTS_URL,
+          ttsVoice: "pf_dora",
+          ...(reply.recovery === true
+            ? {
+              ttsRecovery: { label: "dev.jarvis.tts", plist: PLIST, uid: 501, waitSeconds: 20 },
+              falaLog: FALA_LOG
+            }
+            : {})
+        })
       ),
       Layer.succeed(HttpClient.HttpClient, client),
       fs,
       Path.layer
     ))
   )
-  return { commands, directories, layer, removed, requests, state, written }
+  return { commands, directories, log, layer, removed, requests, state, written }
 }
 
 const speak = (text: string) => MacVoice.use((voice) => voice.speak(text))
@@ -263,6 +299,72 @@ describe("MacVoice.speak through the TTS server", () => {
   })
 })
 
+describe("MacVoice.speak recovering the TTS LaunchAgent", () => {
+  const launchctlArgs = (fake: ReturnType<typeof fakeSpawner>) =>
+    fake.commands.filter((c) => c.command === LAUNCHCTL).map((c) => c.args)
+
+  it.effect("kickstarts a loaded agent, waits for /health and plays Kokoro", () => {
+    const fake = fakeSpawner({ recovery: true, upAfterStart: true, healthyAfterS: 3 })
+    return Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(speak("Olá"))
+      yield* TestClock.adjust(Duration.seconds(5))
+      yield* Fiber.join(fiber)
+      assert.deepStrictEqual(launchctlArgs(fake), [
+        ["print", "gui/501/dev.jarvis.tts"],
+        ["kickstart", "gui/501/dev.jarvis.tts"]
+      ])
+      assert.strictEqual(fake.commands.at(-1)?.args[4], AFPLAY)
+      assert.strictEqual(fake.log.length, 1)
+      assert.match(fake.log[0]!, /^\/state\/jarvis\/tts\/logs\/fala\.log\n\S+Z pid=\d+ motor=kokoro chars=3 audio_s=0 rc=0 dur_s=\d+\n$/)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("bootstraps the plist when the agent is unloaded", () => {
+    const fake = fakeSpawner({ recovery: true, upAfterStart: true, launchctlPrint: 113 })
+    return Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(speak("Olá"))
+      yield* TestClock.adjust(Duration.seconds(3))
+      yield* Fiber.join(fiber)
+      assert.deepStrictEqual(launchctlArgs(fake), [
+        ["print", "gui/501/dev.jarvis.tts"],
+        ["bootstrap", "gui/501", PLIST]
+      ])
+      assert.strictEqual(fake.commands.at(-1)?.args[4], AFPLAY)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("falls back to say after waiting 20 seconds, logging the reason", () => {
+    const fake = fakeSpawner({ recovery: true })
+    return Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(speak("Olá"))
+      yield* TestClock.adjust(Duration.seconds(19))
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* TestClock.adjust(Duration.seconds(2))
+      yield* Fiber.join(fiber)
+      assert.strictEqual(fake.commands.at(-1)?.args[4], SAY)
+      assert.match(fake.log[0]!, /motor=say chars=3 audio_s=\? rc=0 dur_s=\d+ motivo=tts_nao_subiu\n$/)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("goes straight to say when there is no plist and the agent is not loaded", () => {
+    const fake = fakeSpawner({ recovery: true, launchctlPrint: 113, plistExists: false })
+    return Effect.gen(function*() {
+      yield* speak("Olá")
+      assert.deepStrictEqual(launchctlArgs(fake), [["print", "gui/501/dev.jarvis.tts"]])
+      assert.strictEqual(fake.commands.at(-1)?.args[4], SAY)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("does not touch launchd when the server is up but synthesis fails", () => {
+    const fake = fakeSpawner({ recovery: true, tts: "http500" })
+    return Effect.gen(function*() {
+      yield* speak("Olá")
+      assert.deepStrictEqual(launchctlArgs(fake), [])
+      assert.match(fake.log[0]!, /motor=say .* motivo=tts_falhou\n$/)
+    }).pipe(Effect.provide(fake.layer))
+  })
+})
+
 describe("MacVoiceConfig", () => {
   const load = (env: Record<string, string>) =>
     Effect.gen(function*() {
@@ -280,7 +382,14 @@ describe("MacVoiceConfig", () => {
         voice: "Luciana",
         lock: "/Users/test/.local/share/jarvis/fala.lock",
         ttsUrl: "http://127.0.0.1:7349",
-        ttsVoice: "pf_dora"
+        ttsVoice: "pf_dora",
+        ttsRecovery: {
+          label: "dev.jarvis.tts",
+          plist: "/Users/test/Library/LaunchAgents/dev.jarvis.tts.plist",
+          uid: process.getuid?.() ?? 501,
+          waitSeconds: 20
+        },
+        falaLog: "/Users/test/.local/share/jarvis/tts/logs/fala.log"
       })
     }))
 
@@ -297,7 +406,14 @@ describe("MacVoiceConfig", () => {
         voice: "Felipe",
         lock: "/tmp/x/y.lock",
         ttsUrl: "http://127.0.0.1:9000",
-        ttsVoice: "pm_alex"
+        ttsVoice: "pm_alex",
+        ttsRecovery: {
+          label: "dev.jarvis.tts",
+          plist: "/Users/test/Library/LaunchAgents/dev.jarvis.tts.plist",
+          uid: process.getuid?.() ?? 501,
+          waitSeconds: 20
+        },
+        falaLog: "/Users/test/.local/share/jarvis/tts/logs/fala.log"
       })
     }))
 })
