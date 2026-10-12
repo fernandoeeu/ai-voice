@@ -1,7 +1,8 @@
 #!/bin/bash
 # Cliente do servidor local de TTS (Kokoro). Uso: fala-kokoro.sh "texto" [voz]
 # Sintetiza no servidor local (AI_VOICE_TTS_URL, padrão http://127.0.0.1:7349) e toca com afplay;
-# se o servidor falhar ou passar de 10 s, cai para `say -v $AI_VOICE_MAC_VOICE` (padrão Luciana).
+# se o servidor estiver fora do ar, sobe o LaunchAgent dev.jarvis.tts e tenta de novo; só se ainda
+# falhar (ou passar de 10 s) cai para `say -v $AI_VOICE_MAC_VOICE` (padrão Luciana).
 # Serializa a fala com lockf no mesmo arquivo que o servidor MCP usa (AI_VOICE_MAC_LOCK).
 set -u
 
@@ -44,11 +45,36 @@ registra() {
 }
 trap 'registra "${MOTOR:-?}" "${AUDIO_S:-?}" 143; exit 143' TERM
 
-if /usr/bin/curl -sf --max-time 10 \
-     -H 'Content-Type: application/json' \
-     --data-binary "$BODY" \
-     -o "$TMP" "${TTS_URL%/}/synthesize" \
-   && [ -s "$TMP" ]; then
+sintetiza() {
+  /usr/bin/curl -sf --max-time 10 \
+    -H 'Content-Type: application/json' \
+    --data-binary "$BODY" \
+    -o "$TMP" "${TTS_URL%/}/synthesize" \
+    && [ -s "$TMP" ]
+}
+
+# Servidor fora do ar (LaunchAgent descarregado por uma reinstalação, ou morto): sobe o
+# dev.jarvis.tts e espera o /health antes de desistir do Kokoro, em vez de cair direto no say.
+TTS_LABEL="${JARVIS_TTS_LABEL:-dev.jarvis.tts}"
+TTS_PLIST="$HOME/Library/LaunchAgents/$TTS_LABEL.plist"
+sobe_servidor() {
+  local dom="gui/$(id -u)" i
+  if /bin/launchctl print "$dom/$TTS_LABEL" >/dev/null 2>&1; then
+    /bin/launchctl kickstart "$dom/$TTS_LABEL" >/dev/null 2>&1
+  elif [ -f "$TTS_PLIST" ]; then
+    /bin/launchctl bootstrap "$dom" "$TTS_PLIST" >/dev/null 2>&1
+  else
+    return 1
+  fi
+  for i in $(seq 1 "${JARVIS_TTS_ESPERA_S:-20}"); do
+    /usr/bin/curl -sf --max-time 1 "${TTS_URL%/}/health" >/dev/null 2>&1 && return 0
+    sleep 1
+  done
+  return 1
+}
+
+if sintetiza || { ! /usr/bin/curl -sf --max-time 2 "${TTS_URL%/}/health" >/dev/null 2>&1 \
+                  && sobe_servidor && sintetiza; }; then
   MOTOR=kokoro
   # WAV mono 16 bits a 24 kHz com cabeçalho de 44 bytes.
   AUDIO_S=$(( ($(stat -f %z "$TMP") - 44) / 48000 ))
