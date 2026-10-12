@@ -12,7 +12,8 @@
 	<link rel="icon" href={favicon} />
 </svelte:head>
 
-<ModeWatcher themeColors={{ light: 'oklch(0.948 0.012 252)', dark: 'oklch(0.172 0.036 272)' }} />
+<!-- The browser chrome matches the shell's second neutral layer (--chrome). -->
+<ModeWatcher themeColors={{ light: 'oklch(0.963 0.0035 85)', dark: 'oklch(0.153 0.004 70)' }} />
 
 <AppShell>
 	{@render children()}

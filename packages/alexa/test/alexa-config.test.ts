@@ -21,7 +21,8 @@ describe("AlexaConfig", () => {
         locale: "en-US",
         alexaHost: Option.none(),
         speechEnabled: false,
-        defaultDevice: Option.none()
+        defaultDevice: Option.none(),
+        speakLock: "/tmp/alexa-speak.lock"
       })
     }))
 
@@ -33,7 +34,8 @@ describe("AlexaConfig", () => {
         AI_VOICE_LOCALE: "pt-BR",
         AI_VOICE_ALEXA_HOST: "alexa.amazon.com.br",
         AI_VOICE_ENABLE_SPEECH: "1",
-        AI_VOICE_DEFAULT_DEVICE: "SERIAL"
+        AI_VOICE_DEFAULT_DEVICE: "SERIAL",
+        AI_VOICE_SPEAK_LOCK: "/var/run/../tmp/echo.lock"
       })
       assert.deepStrictEqual(config, {
         stateDir: "/srv/ai-voice",
@@ -41,7 +43,8 @@ describe("AlexaConfig", () => {
         locale: "pt-BR",
         alexaHost: Option.some("alexa.amazon.com.br"),
         speechEnabled: true,
-        defaultDevice: Option.some("SERIAL")
+        defaultDevice: Option.some("SERIAL"),
+        speakLock: "/var/tmp/echo.lock"
       })
       assert.isFalse((yield* load({ HOME: "/h", AI_VOICE_ENABLE_SPEECH: "true" })).speechEnabled)
     }))

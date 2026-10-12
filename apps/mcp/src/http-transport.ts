@@ -11,9 +11,12 @@ export const path = "/mcp"
  *
  * `McpServer.layerHttp` refuses any request carrying `Origin` (no origins are
  * allowed), so a web page open in a browser cannot reach the endpoint.
+ * Only the voice tools are served: without authentication, the Apple tools
+ * (reminders, calendar, phone_call) stay on stdio.
  */
 export const McpRoutes = Layer.unwrap(Effect.map(serverOptions, (options) =>
-  VoiceTools.pipe(Layer.provide(McpServer.layerHttp({ ...options, path })))
+  // DELETE ends a session, as clients do when they disconnect; sessions never expire otherwise.
+  VoiceTools.pipe(Layer.provide(McpServer.layerHttp({ ...options, path, allowSessionTermination: true })))
 ))
 
 /**

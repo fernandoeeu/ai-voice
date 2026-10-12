@@ -3,7 +3,17 @@ import { Deferred, Effect, Exit, Fiber, Layer, Option, Scope } from "effect"
 import { TestClock } from "effect/testing"
 import { HttpClient } from "effect/http"
 import { Alexa, AlexaConfig, type SequenceNode } from "../src/index.ts"
-import { makeFixture, makeMemoryFileSystem, NOW, SESSION_FILE, STATE_DIR, testConfig } from "./fixtures.ts"
+import {
+  makeFakeLock,
+  makeFixture,
+  makeMemoryFileSystem,
+  NOW,
+  runWithClock,
+  SESSION_FILE,
+  SPEAK_LOCK,
+  STATE_DIR,
+  testConfig
+} from "./fixtures.ts"
 
 const failure = <A, E extends { readonly _tag: string; readonly message: string }>(effect: Effect.Effect<A, E>) =>
   Effect.flip(effect)
@@ -17,7 +27,12 @@ describe("Alexa", () => {
     Effect.gen(function*() {
       const fs = makeMemoryFileSystem()
       const alexa = yield* Alexa.make({ makeRemote: () => assert.fail("must not run") }).pipe(
-        Effect.provide(Layer.mergeAll(Layer.succeed(AlexaConfig, testConfig({ speechEnabled: false })), noNetwork, fs.layer))
+        Effect.provide(Layer.mergeAll(
+          Layer.succeed(AlexaConfig, testConfig({ speechEnabled: false })),
+          noNetwork,
+          fs.layer,
+          makeFakeLock().layer
+        ))
       )
       const error = yield* failure(alexa.speak({ deviceSerial: "TEST", text: "Test" }))
       assert.strictEqual(error._tag, "SpeechError")
@@ -28,7 +43,7 @@ describe("Alexa", () => {
     Effect.gen(function*() {
       const fs = makeMemoryFileSystem()
       const alexa = yield* Alexa.make({ makeRemote: () => assert.fail("must not run") }).pipe(
-        Effect.provide(Layer.mergeAll(Layer.succeed(AlexaConfig, testConfig()), noNetwork, fs.layer))
+        Effect.provide(Layer.mergeAll(Layer.succeed(AlexaConfig, testConfig()), noNetwork, fs.layer, makeFakeLock().layer))
       )
       for (const text of ["", "  ", "<speak>Hello</speak>", "a".repeat(4001)]) {
         const error = yield* failure(alexa.speak({ deviceSerial: "TEST", text }))
@@ -53,7 +68,7 @@ describe("Alexa", () => {
     Effect.gen(function*() {
       const { alexa, sent } = yield* makeFixture()
       const text = "Olá! O valor é 1.25 e a versão é 2.3."
-      const result = yield* alexa.speak({ deviceSerial: "TEST-ECHO", text })
+      const result = yield* runWithClock(alexa.speak({ deviceSerial: "TEST-ECHO", text }))
       const node = sent[0]!.startNode as SequenceNode
       assert.strictEqual(node.type, "Alexa.Speak")
       assert.deepInclude(node.operationPayload, {
@@ -70,7 +85,7 @@ describe("Alexa", () => {
     Effect.gen(function*() {
       const { alexa, sent } = yield* makeFixture({ config: { defaultDevice: Option.some("TEST-ECHO") } })
       const text = "This is a text that will be spoken in ordered parts. ".repeat(12).trim()
-      const result = yield* alexa.speak({ text })
+      const result = yield* runWithClock(alexa.speak({ text }))
       assert.isTrue((yield* alexa.devices)[0]!.isDefault)
       const start = sent[0]!.startNode
       assert.strictEqual(start["@type"], "com.amazon.alexa.behaviors.model.SerialNode")
@@ -193,7 +208,7 @@ describe("Alexa", () => {
       assert.isTrue(Exit.isFailure(exit))
       assert.strictEqual(counters.sends, 1)
       api.preview = () => Effect.succeed({ status: 200, body: "" })
-      yield* alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" })
+      yield* runWithClock(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))
       assert.strictEqual(counters.sends, 2)
     }))
 
@@ -227,4 +242,99 @@ describe("Alexa", () => {
       yield* Scope.close(scope, Exit.void)
       assert.strictEqual(counters.stops, 1)
     }))
+
+  describe("speak lock shared with lockf(1)", () => {
+    it.effect("takes the lock with lockf around the POST and holds it one second per chunk", () =>
+      Effect.gen(function*() {
+        const { alexa, lock } = yield* makeFixture()
+        const text = "This is a text that will be spoken in ordered parts. ".repeat(12).trim()
+        const result = yield* runWithClock(alexa.speak({ deviceSerial: "TEST-ECHO", text }))
+        assert.isAbove(result.chunks, 1)
+        assert.strictEqual(lock.commands.length, 1)
+        assert.strictEqual(lock.commands[0]!.command, "/usr/bin/lockf")
+        assert.deepStrictEqual(lock.commands[0]!.args, ["-k", "-s", "-t", "90", SPEAK_LOCK, "/bin/cat"])
+        assert.isUndefined(lock.commands[0]!.options.shell)
+        assert.deepStrictEqual(lock.events.map((event) => event._tag), ["acquire", "send", "release"])
+        const [, send, release] = lock.events
+        assert.strictEqual(release!.at - send!.at, result.chunks * 1000)
+        assert.isFalse(lock.held)
+      }))
+
+    it.effect("uses the configured lock path", () =>
+      Effect.gen(function*() {
+        const { alexa, lock } = yield* makeFixture({ config: { speakLock: "/test/other.lock" } })
+        yield* runWithClock(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))
+        assert.include(lock.commands[0]!.args, "/test/other.lock")
+      }))
+
+    it.effect("waits at most 90 seconds, then fails with Echo ocupado without speaking", () =>
+      Effect.gen(function*() {
+        const { alexa, lock, counters } = yield* makeFixture()
+        const waiting = yield* Deferred.make<void>()
+        lock.acquire = Effect.andThen(Deferred.succeed(waiting, undefined), Effect.never)
+        const fiber = yield* Effect.forkChild(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))
+        yield* Deferred.await(waiting)
+        yield* TestClock.adjust("89 seconds")
+        assert.isUndefined(fiber.pollUnsafe())
+        yield* TestClock.adjust("1 second")
+        const error = yield* Effect.flip(Fiber.join(fiber))
+        assert.strictEqual(error._tag, "SpeechError")
+        assert.match(error.message, /Echo ocupado/)
+        assert.strictEqual(counters.sends, 0)
+        assert.strictEqual(lock.commands.length, 1)
+      }))
+
+    it.effect("lockf giving up (EX_TEMPFAIL) is Echo ocupado; other lockf failures never speak either", () =>
+      Effect.gen(function*() {
+        const { alexa, lock, counters } = yield* makeFixture()
+        lock.acquire = Effect.succeed(false)
+        assert.match((yield* failure(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))).message, /Echo ocupado/)
+        lock.exitCode = 73
+        assert.match(
+          (yield* failure(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))).message,
+          /Could not take the speech lock/
+        )
+        assert.strictEqual(counters.sends, 0)
+      }))
+
+    it.effect("a rejected POST releases the lock at once and is not retried", () =>
+      Effect.gen(function*() {
+        const { alexa, api, lock, counters } = yield* makeFixture()
+        api.preview = () => Effect.succeed({ status: 503, body: "" })
+        assert.match((yield* failure(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))).message, /HTTP 503/)
+        assert.deepStrictEqual(lock.events.map((event) => event._tag), ["acquire", "send", "release"])
+        assert.strictEqual(lock.events[2]!.at, lock.events[1]!.at)
+        assert.strictEqual(counters.sends, 1)
+      }))
+
+    it.effect("an interrupted speech releases the lock", () =>
+      Effect.gen(function*() {
+        const { alexa, api, lock } = yield* makeFixture()
+        const sending = yield* Deferred.make<void>()
+        api.preview = () => Effect.andThen(Deferred.succeed(sending, undefined), Effect.never)
+        const fiber = yield* Effect.forkChild(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))
+        yield* Deferred.await(sending)
+        assert.isTrue(lock.held)
+        yield* Fiber.interrupt(fiber)
+        assert.isFalse(lock.held)
+        assert.strictEqual(lock.events.at(-1)!._tag, "release")
+      }))
+
+    it.effect("the in-process semaphore still rejects a concurrent speech before touching the lock", () =>
+      Effect.gen(function*() {
+        const { alexa, api, lock } = yield* makeFixture()
+        const sending = yield* Deferred.make<void>()
+        const done = yield* Deferred.make<void>()
+        api.preview = () =>
+          Effect.andThen(Deferred.succeed(sending, undefined), Deferred.await(done)).pipe(
+            Effect.as({ status: 200, body: "" })
+          )
+        const fiber = yield* Effect.forkChild(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Test" }))
+        yield* Deferred.await(sending)
+        assert.match((yield* failure(alexa.speak({ deviceSerial: "TEST-ECHO", text: "Other" }))).message, /in progress/)
+        assert.strictEqual(lock.commands.length, 1)
+        yield* Deferred.succeed(done, undefined)
+        yield* runWithClock(Fiber.join(fiber))
+      }))
+  })
 })

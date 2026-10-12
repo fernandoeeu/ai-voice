@@ -1,12 +1,10 @@
 import { Maps, Phone } from '@jarvis/apple';
 import { fail } from '@sveltejs/kit';
 import type { AppleFailure } from '#lib/apple/failure.js';
-import { checkPhone, isCallVia } from '#lib/components/ir/phone.js';
+import { isMapsMode, type MapsMode } from '#lib/ir/maps.js';
+import { checkPhone, isCallVia } from '#lib/ir/phone.js';
 import { runApple } from '#lib/server/apple-gateway.js';
 import type { Actions } from './$types';
-
-const MODES = ['driving', 'walking', 'transit'] as const;
-type Mode = (typeof MODES)[number];
 
 const field = (data: FormData, name: string) => {
 	const value = data.get(name);
@@ -21,7 +19,7 @@ export const actions = {
 		const data = await request.formData();
 		const query = field(data, 'query');
 		const values = { panel: 'maps' as const, kind: 'search' as const, query };
-		if (query === '') return fail(400, { ...values, invalid: 'Escreva o lugar que o Maps deve buscar.' });
+		if (query === '') return fail(400, { ...values, invalid: 'Escreva o lugar que o Mapas deve buscar.' });
 		if (query.length > 500) return fail(400, { ...values, invalid: 'A busca passa de 500 caracteres.' });
 
 		const outcome = await runApple(Maps.use((maps) => maps.search({ query })));
@@ -34,7 +32,7 @@ export const actions = {
 		const to = field(data, 'to');
 		const from = field(data, 'from');
 		const rawMode = field(data, 'mode');
-		const mode: Mode = (MODES as readonly string[]).includes(rawMode) ? (rawMode as Mode) : 'driving';
+		const mode: MapsMode = isMapsMode(rawMode) ? rawMode : 'driving';
 		const values = { panel: 'maps' as const, kind: 'directions' as const, to, from, mode };
 		if (to === '') return fail(400, { ...values, invalid: 'Informe o destino da rota.' });
 		if (to.length > 500 || from.length > 500) return fail(400, { ...values, invalid: 'Endereço com mais de 500 caracteres.' });

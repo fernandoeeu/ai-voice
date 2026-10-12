@@ -13,12 +13,14 @@ import {
   SynchronizedRef
 } from "effect"
 import { HttpClient } from "effect/http"
+import { ChildProcessSpawner } from "effect/process"
 import { AlexaConfig } from "./alexa-config.ts"
-import { DeviceError, SessionError, SpeechError } from "./alexa-error.ts"
+import { DeviceError, SessionError, SpeechError, speechDisabled } from "./alexa-error.ts"
 import { checkAuthentication, echoDevices, type EchoDevice, targetOf, websiteApiHost } from "./alexa-api.ts"
 import { type AlexaRemoteClient, invalidSession, makeAlexaRemote, refreshSession, USER_AGENT } from "./alexa-remote.ts"
 import { makeSendSpeech } from "./send-speech.ts"
 import { loadSession, saveSession } from "./session.ts"
+import { withSpeakLock } from "./speak-lock.ts"
 import { type Echo, MAX_TEXT_LENGTH, type SpeechAccepted, SpeechText, speechSequence, splitSpeech } from "./speech.ts"
 
 const AUTH_CHECK_INTERVAL = 30 * 60 * 1000
@@ -38,6 +40,7 @@ const make = Effect.fnUntraced(function*(options: AlexaOptions) {
   const config = yield* AlexaConfig
   const client = yield* HttpClient.HttpClient
   const sendSpeech = makeSendSpeech(client)
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const context = yield* Effect.context<FileSystem.FileSystem | Path.Path>()
   const layerScope = yield* Scope.Scope
   const connection = yield* SynchronizedRef.make(Option.none<Connection>())
@@ -142,7 +145,9 @@ const make = Effect.fnUntraced(function*(options: AlexaOptions) {
       return yield* new DeviceError({ message: "Echo not found. Use a serial returned by list_devices." })
     }
     if (!device.online) return yield* new DeviceError({ message: "Echo is offline." })
-    yield* sendSpeech(target, speechSequence(remote, device, chunks, config.locale))
+    const sequence = speechSequence(remote, device, chunks, config.locale)
+    // Other programs on this Mac speak through the same lock file: wait for them, never overlap.
+    yield* withSpeakLock(spawner, config.speakLock, chunks.length, sendSpeech(target, sequence))
     return {
       status: "accepted",
       device: device.accountName,
@@ -154,10 +159,7 @@ const make = Effect.fnUntraced(function*(options: AlexaOptions) {
   const speak = Effect.fn("Alexa.speak")(
     function*(input: { readonly text: string; readonly deviceSerial?: string | undefined }) {
       if (!config.speechEnabled) {
-        return yield* new SpeechError({
-          message:
-            "Speech is disabled. Once the user authorizes it, set AI_VOICE_ENABLE_SPEECH=1 and restart the MCP server."
-        })
+        return yield* speechDisabled()
       }
       const serial = Option.filter(
         input.deviceSerial ? Option.some(input.deviceSerial) : config.defaultDevice,
@@ -196,6 +198,10 @@ export class Alexa extends Context.Service<Alexa, {
   static readonly layer: Layer.Layer<
     Alexa,
     never,
-    AlexaConfig | FileSystem.FileSystem | Path.Path | HttpClient.HttpClient
+    | AlexaConfig
+    | FileSystem.FileSystem
+    | Path.Path
+    | HttpClient.HttpClient
+    | ChildProcessSpawner.ChildProcessSpawner
   > = Layer.effect(Alexa, Alexa.make({ makeRemote: makeAlexaRemote }))
 }

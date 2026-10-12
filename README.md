@@ -14,12 +14,14 @@ agent  > (calls speak) "Migration finished. All 42 tables were updated and the t
 > [!NOTE]
 > Jarvis is a fork of [AI Voice](https://github.com/henriquearthur/ai-voice) by Henrique Arthur (MIT). The original project is the one to credit for the idea and the first implementation. This fork restructures it as a Bun + Turborepo monorepo and adds a dashboard.
 
-Jarvis exposes two tools:
+Voice tools, available on both transports:
 
 | Tool | What it does |
 | --- | --- |
 | `list_devices` | Lists the physical Echo devices on your Amazon account. Plays no audio. |
 | `speak` | Speaks up to 4000 characters of plain text on one Echo. Uses your default Echo when `device_serial` is omitted. |
+
+Mac tools, available **only over stdio** (the HTTP endpoint has no authentication, so it stays voice-only): `reminders_lists`, `reminders_list`, `reminders_add`, `calendar_today`, `calendar_events`, `calendar_calendars`, `maps_search`, `maps_directions` and `phone_call`. They drive Reminders, Calendar and Maps through `osascript`, and `phone_call` hands a number to macOS, which asks you to confirm before dialing. See the [configuration reference](docs/configuration.md#tools).
 
 > [!IMPORTANT]
 > Jarvis is an unofficial, community project. It is not affiliated with or endorsed by Amazon, and it relies on the private APIs the Alexa app uses, through [`alexa-remote2`](https://github.com/Apollon77/alexa-remote). Amazon can change those APIs at any time. Read [How the Alexa integration works](docs/alexa-integration.md) before trusting it with your account.
@@ -31,15 +33,17 @@ This is a Bun workspace managed by Turborepo.
 | Path | Package | What it is |
 | --- | --- | --- |
 | `packages/alexa` | `@jarvis/alexa` | Alexa session, devices, speech and login, built on Effect v4. |
-| `apps/mcp` | `@jarvis/mcp` | The MCP server (stdio and Streamable HTTP on `/mcp`) and the `login` and `devices` commands. Built on Effect v4. |
-| `apps/dashboard` | `@jarvis/dashboard` | SvelteKit dashboard. |
+| `packages/apple` | `@jarvis/apple` | Reminders, Calendar, Maps and Phone on the Mac, through `osascript` and `open`. Effect v4. |
+| `packages/grokbot` | `@jarvis/grokbot` | In progress. Send-only and at-most-once: it sends a message and has no result channel. |
+| `apps/mcp` | `@jarvis/mcp` | The MCP server (bin `jarvis-voice`: stdio and Streamable HTTP on `/mcp`) and the `login` and `devices` commands. Built on Effect v4. |
+| `apps/dashboard` | `@jarvis/dashboard` | SvelteKit dashboard: `/` (Alexa), `/lembretes`, `/agenda` and `/ir`. |
 
 Environment variables keep the `AI_VOICE_*` names from the original project.
 
 ## Requirements
 
 - [Bun](https://bun.sh) 1.3 or newer. The exact version is pinned in `packageManager` in `package.json`.
-- macOS.
+- macOS. The Mac tools and the dashboard's Reminders, Agenda and Ir pages need it, and macOS asks for Automation permission the first time.
 - An Amazon account with at least one Echo device.
 - The machine running Jarvis must be on and online while agents use it.
 
@@ -137,6 +141,8 @@ To make an agent speak without being asked each time, add a rule to its instruct
 ```sh
 bunx turbo run dev --filter=@jarvis/dashboard
 ```
+
+Pages: `/` sends speech to an Echo, `/lembretes` lists and creates reminders, `/agenda` shows today or the week, and `/ir` opens Maps searches and routes or starts a call after an explicit confirmation. The dashboard reads the same `AI_VOICE_*` variables and has no authentication of its own, so keep it on a machine and network you trust. See [the dashboard section](docs/configuration.md#dashboard).
 
 ## What to expect
 

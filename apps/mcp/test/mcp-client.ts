@@ -1,4 +1,4 @@
-import { Effect, FileSystem, Queue, Schema, Stream } from "effect"
+import { Cause, Effect, FileSystem, Queue, Schema, Stream } from "effect"
 import { ChildProcess } from "effect/process"
 
 const serverEntry = new URL("../src/main.ts", import.meta.url).pathname
@@ -14,6 +14,7 @@ export const decodeJsonRpcResponse = Schema.decodeUnknownEffect(Schema.fromJsonS
 
 export const ToolResult = Schema.Struct({
   isError: Schema.optionalKey(Schema.Boolean),
+  structuredContent: Schema.optionalKey(Schema.Unknown),
   content: Schema.Array(Schema.Struct({ type: Schema.Literal("text"), text: Schema.String }))
 })
 
@@ -52,7 +53,7 @@ export const isolatedEnv = Effect.gen(function*() {
  * Spawns `bun src/main.ts` with extra variables over `isolatedEnv`.
  */
 export const spawnServer = Effect.fnUntraced(function*(env: Record<string, string> = {}) {
-  const stdin = yield* Queue.unbounded<Uint8Array>()
+  const stdin = yield* Queue.unbounded<Uint8Array, Cause.Done>()
   const handle = yield* ChildProcess.make("bun", [serverEntry], {
     env: { ...(yield* isolatedEnv), ...env },
     extendEnv: false,
@@ -63,9 +64,10 @@ export const spawnServer = Effect.fnUntraced(function*(env: Record<string, strin
 
 /**
  * A newline-delimited JSON-RPC client over the stdio of a spawned server.
+ * Every stdout line must decode as a JSON-RPC message, or requests time out.
  */
-export const stdioClient = Effect.fnUntraced(function*() {
-  const { handle, stdin } = yield* spawnServer()
+export const stdioClient = Effect.fnUntraced(function*(env: Record<string, string> = {}) {
+  const { handle, stdin } = yield* spawnServer(env)
   const responses = yield* Queue.unbounded<JsonRpcResponse>()
   yield* handle.stdout.pipe(
     Stream.decodeText,
@@ -87,7 +89,16 @@ export const stdioClient = Effect.fnUntraced(function*() {
     }
   }, Effect.timeout("15 seconds"))
   const notify = (method: string) => send({ method })
-  return { request, notify }
+  const sendRaw = (line: string) => Queue.offer(stdin, encoder.encode(`${line}\n`))
+  // Closing stdin is how clients stop a stdio server.
+  const close = Queue.end(stdin).pipe(Effect.andThen(handle.exitCode), Effect.timeout("15 seconds"))
+  const toolNames = request("initialize", initializeParams).pipe(
+    Effect.andThen(notify("notifications/initialized")),
+    Effect.andThen(request("tools/list")),
+    Effect.flatMap((response) => Schema.decodeUnknownEffect(ToolList)(response.result)),
+    Effect.map(({ tools }) => tools.map((tool) => tool.name).sort())
+  )
+  return { request, notify, sendRaw, close, toolNames, stderr: handle.stderr }
 })
 
 /**
@@ -130,5 +141,8 @@ export const httpClient = (url: string, handle: (request: Request) => Promise<Re
     yield* post({ method: "notifications/initialized" })
     return response
   })
-  return { post, request, initialize }
+  const remove = Effect.promise(() =>
+    handle(new Request(url, { method: "DELETE", headers: sessionHeaders }))
+  )
+  return { post, request, initialize, delete: remove }
 }

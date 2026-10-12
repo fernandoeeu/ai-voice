@@ -1,5 +1,5 @@
 import { assert, describe, it } from "@effect/vitest"
-import { Effect, Fiber, Layer, Sink, Stream } from "effect"
+import { Duration, Effect, Fiber, Layer, Sink, Stream } from "effect"
 import { PlatformError, SystemError } from "effect/PlatformError"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
@@ -152,6 +152,54 @@ describe("Osascript.run", () => {
       yield* TestClock.adjust("15 seconds")
       const error = yield* Fiber.join(fiber)
       assert.include(error.message, "did not finish within 15s")
+      assert.strictEqual(state.released, 1)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("keeps the 15 second default when no per-call timeout is given", () => {
+    const { layer, state } = fakeSpawner({ hang: true })
+    return Effect.gen(function*() {
+      const osascript = yield* Osascript
+      const fiber = yield* Effect.forkChild(Effect.flip(osascript.run("on run argv\nend run", [], {})))
+      yield* TestClock.adjust("14999 millis")
+      assert.isUndefined(fiber.pollUnsafe())
+      assert.strictEqual(state.released, 0)
+      yield* TestClock.adjust("1 millis")
+      const error = yield* Fiber.join(fiber)
+      assert.include(error.message, "did not finish within 15s")
+      assert.strictEqual(state.released, 1)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("respects a longer per-call timeout", () => {
+    const { layer, state } = fakeSpawner({ hang: true })
+    return Effect.gen(function*() {
+      const osascript = yield* Osascript
+      const fiber = yield* Effect.forkChild(
+        Effect.flip(osascript.run("on run argv\nend run", [], { timeout: "45 seconds" }))
+      )
+      yield* TestClock.adjust("15 seconds")
+      assert.isUndefined(fiber.pollUnsafe())
+      yield* TestClock.adjust("29999 millis")
+      assert.isUndefined(fiber.pollUnsafe())
+      assert.strictEqual(state.released, 0)
+      yield* TestClock.adjust("1 millis")
+      const error = yield* Fiber.join(fiber)
+      assert.include(error.message, "did not finish within 45s")
+      assert.strictEqual(state.released, 1)
+    }).pipe(Effect.provide(layer))
+  })
+
+  it.effect("respects a shorter per-call timeout", () => {
+    const { layer, state } = fakeSpawner({ hang: true })
+    return Effect.gen(function*() {
+      const osascript = yield* Osascript
+      const fiber = yield* Effect.forkChild(
+        Effect.flip(osascript.run("on run argv\nend run", [], { timeout: Duration.seconds(2) }))
+      )
+      yield* TestClock.adjust("2 seconds")
+      const error = yield* Fiber.join(fiber)
+      assert.include(error.message, "did not finish within 2s")
       assert.strictEqual(state.released, 1)
     }).pipe(Effect.provide(layer))
   })

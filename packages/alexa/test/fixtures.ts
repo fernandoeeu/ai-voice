@@ -1,4 +1,5 @@
-import { Clock, Effect, FileSystem, Layer, Option, Path, PlatformError } from "effect"
+import { Clock, Effect, Fiber, FileSystem, Layer, Option, Path, PlatformError, Sink, Stream } from "effect"
+import { type ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
 import { HttpClient, HttpClientResponse } from "effect/http"
 import { Alexa, AlexaConfig, makeAlexaRemote, type Session, type SpeechSequence } from "../src/index.ts"
@@ -54,6 +55,69 @@ export const makeMemoryFileSystem = () => {
   return { entries, layer: Layer.merge(layer, Path.layer), writeSession, readSession }
 }
 
+// A fake path: the real lock is only touched by the isolated lockf test, on a temp file.
+export const SPEAK_LOCK = "/test/alexa-speak.lock"
+
+export type LockEvent =
+  | { readonly _tag: "acquire" | "release" | "send"; readonly at: number }
+
+/**
+ * Fake ChildProcessSpawner standing in for `lockf ... /bin/cat`. `acquire` decides the outcome:
+ * true echoes the probe byte (lock held), false exits with EX_TEMPFAIL like `lockf -t`, and a
+ * never-ending effect simulates another program holding the lock.
+ */
+export const makeFakeLock = () => {
+  const state = {
+    acquire: Effect.succeed(true) as Effect.Effect<boolean>,
+    exitCode: 75,
+    held: false,
+    commands: [] as Array<ChildProcess.StandardCommand>,
+    events: [] as Array<LockEvent>
+  }
+  const record = (tag: LockEvent["_tag"]) =>
+    Effect.flatMap(Clock.currentTimeMillis, (at) => Effect.sync(() => void state.events.push({ _tag: tag, at })))
+  const spawner = ChildProcessSpawner.make((command) =>
+    Effect.gen(function*() {
+      if (command._tag !== "StandardCommand") return yield* Effect.die("unexpected piped command")
+      state.commands.push(command)
+      yield* Effect.addFinalizer(() =>
+        state.held ? Effect.andThen(Effect.sync(() => void (state.held = false)), record("release")) : Effect.void
+      )
+      const stdout = Stream.fromEffect(state.acquire).pipe(
+        Stream.flatMap((acquired) =>
+          acquired
+            ? Stream.fromEffect(
+              Effect.as(Effect.andThen(Effect.sync(() => void (state.held = true)), record("acquire")), new Uint8Array([10]))
+            )
+            : Stream.empty
+        )
+      )
+      return ChildProcessSpawner.makeHandle({
+        pid: ChildProcessSpawner.ProcessId(1),
+        exitCode: Effect.sync(() => ChildProcessSpawner.ExitCode(state.exitCode)),
+        isRunning: Effect.succeed(true),
+        kill: () => Effect.void,
+        stdin: Sink.drain,
+        stdout,
+        stderr: Stream.empty,
+        all: stdout,
+        getInputFd: () => Sink.drain,
+        getOutputFd: () => Stream.empty,
+        unref: Effect.succeed(Effect.void)
+      })
+    })
+  )
+  return { state, record, layer: Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner) }
+}
+
+// Runs an effect that may sleep on the TestClock (the post-speech hold), advancing time until it ends.
+export const runWithClock = <A, E>(effect: Effect.Effect<A, E>) =>
+  Effect.gen(function*() {
+    const fiber = yield* Effect.forkChild(effect)
+    for (let i = 0; i < 120 && fiber.pollUnsafe() === undefined; i++) yield* TestClock.adjust("1 second")
+    return yield* Fiber.join(fiber)
+  })
+
 export const testConfig = (overrides: Partial<AlexaConfig["Service"]> = {}): AlexaConfig["Service"] =>
   AlexaConfig.of({
     stateDir: STATE_DIR,
@@ -62,6 +126,7 @@ export const testConfig = (overrides: Partial<AlexaConfig["Service"]> = {}): Ale
     alexaHost: Option.none(),
     speechEnabled: true,
     defaultDevice: Option.none(),
+    speakLock: SPEAK_LOCK,
     ...overrides
   })
 
@@ -115,14 +180,16 @@ export const makeFixture = Effect.fnUntraced(function*(options: {
         return Effect.succeed(respond(api.devices()))
       case "/api/behaviors/preview": {
         counters.sends++
+        if (!lock.state.held) return Effect.die("speech sent without the speak lock")
         const body = request.body._tag === "Uint8Array" ? new TextDecoder().decode(request.body.body) : "{}"
         sent.push(JSON.parse(JSON.parse(body).sequenceJson))
-        return Effect.map(api.preview(), respond)
+        return Effect.map(Effect.andThen(lock.record("send"), api.preview()), respond)
       }
       default:
         return Effect.succeed(respond({ status: 404, body: "" }))
     }
   })
+  const lock = makeFakeLock()
   const fs = makeMemoryFileSystem()
   fs.writeSession({
     localCookie: "csrf=TEST;",
@@ -135,8 +202,9 @@ export const makeFixture = Effect.fnUntraced(function*(options: {
     Effect.provide(Layer.mergeAll(
       Layer.succeed(AlexaConfig, testConfig(options.config)),
       Layer.succeed(HttpClient.HttpClient, client),
-      fs.layer
+      fs.layer,
+      lock.layer
     ))
   )
-  return { alexa, remote, sent, api, requests, counters, fs }
+  return { alexa, remote, sent, api, requests, counters, fs, lock: lock.state }
 })
