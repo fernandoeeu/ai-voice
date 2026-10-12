@@ -31,6 +31,8 @@ export interface RegraLixo {
   readonly idadeComPaiVivoS?: number
   /** Variável de ambiente que o processo precisa ter; sem ela morre na hora, sem olhar idade nem pai. */
   readonly exigeVariavel?: string
+  /** Ao matar um alvo desta regra, mata também os descendentes dele (npm/npx/node da mesma árvore), exceto os protegidos. */
+  readonly incluirFilhos?: boolean
 }
 
 export interface Config {
@@ -69,7 +71,7 @@ export const compilarConfig = (bruto: any): Config => {
     if (!a && !k) throw new Error(`allowlist[${i}] sem argv0 nem comando`)
     return { nome: c.nome ?? `allow-${i}`, ...(a ? { argv0: a } : {}), ...(k ? { comando: k } : {}) }
   })
-  const lixo = ((bruto.lixo ?? []) as Array<BrutoCasador & { idadeMinS?: number; idadeComPaiVivoS?: number; exigeVariavel?: string }>).map(
+  const lixo = ((bruto.lixo ?? []) as Array<BrutoCasador & { idadeMinS?: number; idadeComPaiVivoS?: number; exigeVariavel?: string; incluirFilhos?: boolean }>).map(
     (r, i): RegraLixo => {
       const a = re(r.argv0, `lixo[${i}].argv0`)
       const k = re(r.comando, `lixo[${i}].comando`)
@@ -82,6 +84,7 @@ export const compilarConfig = (bruto: any): Config => {
         ...(k ? { comando: k } : {}),
         ...(x ? { excluir: x } : {}),
         ...(r.exigeVariavel ? { exigeVariavel: r.exigeVariavel } : {}),
+        ...(r.incluirFilhos ? { incluirFilhos: true } : {}),
         idadeMinS: r.idadeMinS ?? 600,
         ...(r.idadeComPaiVivoS === undefined ? {} : { idadeComPaiVivoS: r.idadeComPaiVivoS })
       }

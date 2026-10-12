@@ -152,6 +152,25 @@ export const avaliar = (procs: ReadonlyArray<Proc>, ctx: Contexto): Resultado =>
     }
   }
 
+  // 2b. Regras com incluirFilhos: os descendentes de quem vai morrer vão junto (árvore npm/npx/node), salvo os protegidos.
+  const filhosDe = new Map<number, Array<Proc>>()
+  for (const p of meus) filhosDe.set(p.ppid, [...(filhosDe.get(p.ppid) ?? []), p])
+  const jaMatar = new Set(matar.map((a) => a.proc.pid))
+  for (const alvo of [...matar]) {
+    if (!config.lixo.find((r) => r.padrao === alvo.padrao)?.incluirFilhos) continue
+    const fila = [...(filhosDe.get(alvo.proc.pid) ?? [])]
+    while (fila.length > 0) {
+      const f = fila.shift()!
+      if (jaMatar.has(f.pid) || ehZumbi(f)) continue
+      if (protegido(f)) continue
+      jaMatar.add(f.pid)
+      matar.push({ proc: f, padrao: alvo.padrao, motivo: `filho de ${alvo.proc.pid}, que morre (${alvo.motivo})` })
+      const ip = poupados.findIndex((x) => x.proc.pid === f.pid)
+      if (ip >= 0) poupados.splice(ip, 1)
+      fila.push(...(filhosDe.get(f.pid) ?? []))
+    }
+  }
+
   // 3. Descontrolados: só alerta, nunca mata.
   const cpuVisto: Record<string, { n: number; idadeS: number }> = {}
   for (const p of meus) {

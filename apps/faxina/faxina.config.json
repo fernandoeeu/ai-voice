@@ -52,6 +52,12 @@
       "idadeComPaiVivoS": 1800
     },
     {
+      "padrao": "chrome-devtools-ponte-orfa",
+      "comando": "chrome-devtools-axi-bridge|chrome-devtools-mcp",
+      "idadeMinS": 3600,
+      "incluirFilhos": true
+    },
+    {
       "padrao": "python-bench-scratchpad",
       "argv0": "(^|/)[Pp]ython[\\d.]*$",
       "comando": "scratchpad\\S*(bench|Bench)|(bench|Bench)\\S*scratchpad|/scratchpad/.*bench",

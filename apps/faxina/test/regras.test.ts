@@ -124,6 +124,43 @@ describe("Escuta sem ESCUTA_LOCK próprio", () => {
   })
 })
 
+describe("pontes chrome-devtools órfãs", () => {
+  const PT = "/m/chrome-devtools-axi/dist/bin/chrome-devtools-axi-bridge.js"
+  const ps = `  700    1  700 S  02:00:00  0.1  50000  501 node ${PT}
+  701  700  701 S  02:00:00  0.1  50000  501 npm exec chrome-devtools-mcp@latest --browserUrl=http://127.0.0.1:9333
+  702  701  702 S  02:00:00  0.1  50000  501 chrome-devtools-mcp
+  703  702  703 S  02:00:00  0.1  50000  501 node /x/chrome-devtools-mcp/build/src/telemetry/watchdog/main.js --parent-pid=702
+  710    1  710 S  00:30:00  0.1  50000  501 node ${PT}
+  711  710  711 S  00:30:00  0.1  50000  501 npm exec chrome-devtools-mcp@latest
+  720  900  720 S  05:00:00  0.1  50000  501 node ${PT}
+  721  720  721 S  05:00:00  0.1  50000  501 chrome-devtools-mcp
+  730    1  730 S  05:00:00  0.1  50000  999 node ${PT}
+  800  900  800 S  05:00:00  0.1  50000  501 claude --resume
+  801  800  801 S  05:00:00  0.1  50000  501 node /x/outra-coisa.js
+  900    1  900 Ss 06:00:00  0.0   2000  501 /bin/zsh
+`
+  const r = avaliar(parsePs(ps), { config, uid: UID, meuPid: 9999, cpuAnterior: {} })
+  const m = r.matar.map((a) => a.proc.pid).sort((a, b) => a - b)
+  it("órfã com mais de 1 h morre, com a árvore inteira de filhos", () => {
+    expect(m).toEqual([700, 701, 702, 703])
+  })
+  it("órfã com menos de 1 h fica, e os filhos dela também", () => {
+    expect(m).not.toContain(710)
+    expect(m).not.toContain(711)
+    expect(r.poupados.find((a) => a.proc.pid === 710)?.motivo).toMatch(/órfão, mas só/)
+  })
+  it("ponte com pai vivo fica, por mais velha que seja", () => {
+    expect(m).not.toContain(720)
+    expect(m).not.toContain(721)
+    expect(r.poupados.find((a) => a.proc.pid === 720)?.motivo).toMatch(/pai 900 vivo/)
+  })
+  it("outro uid e claude ficam", () => {
+    expect(m).not.toContain(730)
+    expect(m).not.toContain(800)
+    expect(m).not.toContain(801)
+  })
+})
+
 describe("nunca mate", () => {
   it("claude, codex e herdr, mesmo que um padrão de lixo os casasse", () => {
     const frouxa = compilarConfig({ lixo: [{ padrao: "tudo", comando: ".*", idadeMinS: 0 }] })
