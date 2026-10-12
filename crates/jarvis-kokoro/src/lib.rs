@@ -1,9 +1,20 @@
 //! Cliente do Kokoro (HTTP em 127.0.0.1:7349, WAV s16le 24 kHz mono).
-//! Esqueleto da F0: so o contrato. A implementacao vem na F1.
+//!
+//! - [`KokoroHttp`]: implementacao de [`Sintetizador`] sobre reqwest (timeout de 10 s).
+//! - [`dividir_frases`]: porta fiel do `split_text` do `server.py`, com opcao
+//!   de primeira fatia curta para o primeiro som sair mais cedo.
+//! - [`wav::decodificar`]: parser WAV que valida 24 kHz, mono e 16 bits.
 
 use std::future::Future;
 
 pub use jarvis_protocolo::Pcm24k;
+
+mod cliente;
+mod frases;
+pub mod wav;
+
+pub use cliente::{ErroKokoro, KokoroHttp, URL_PADRAO};
+pub use frases::{MAX_CHUNK, PRIMEIRA_CURTA, dividir_frases};
 
 pub type Result<T> = anyhow::Result<T>;
 

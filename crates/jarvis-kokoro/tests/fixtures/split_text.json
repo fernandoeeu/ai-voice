@@ -1,0 +1,281 @@
+[
+ {
+  "texto": "Olá, tudo bem?",
+  "pedacos": [
+   "Olá, tudo bem?"
+  ]
+ },
+ {
+  "texto": "Pronto. Fiz o deploy! Quer que eu confira os logs?",
+  "pedacos": [
+   "Pronto.",
+   "Fiz o deploy!",
+   "Quer que eu confira os logs?"
+  ]
+ },
+ {
+  "texto": "Deixa eu ver… acho que sim. Talvez não; vamos testar: funciona?",
+  "pedacos": [
+   "Deixa eu ver…",
+   "acho que sim.",
+   "Talvez não;",
+   "vamos testar:",
+   "funciona?"
+  ]
+ },
+ {
+  "texto": "Primeiro passo: abrir o terminal; segundo passo: rodar o comando. Terceiro: conferir.",
+  "pedacos": [
+   "Primeiro passo:",
+   "abrir o terminal;",
+   "segundo passo:",
+   "rodar o comando.",
+   "Terceiro:",
+   "conferir."
+  ]
+ },
+ {
+  "texto": "Linha um.\nLinha dois.\n\n\nLinha três sem ponto",
+  "pedacos": [
+   "Linha um.",
+   "Linha dois.",
+   "Linha três sem ponto"
+  ]
+ },
+ {
+  "texto": "  muitos    espaços \t e\ttabs   aqui.   Fim.  ",
+  "pedacos": [
+   "muitos espaços e tabs aqui.",
+   "Fim."
+  ]
+ },
+ {
+  "texto": "Lista:\n- maçã\n- banana\n- laranja\n",
+  "pedacos": [
+   "Lista:",
+   "- maçã",
+   "- banana",
+   "- laranja"
+  ]
+ },
+ {
+  "texto": "1. Instalar. 2. Configurar. 3. Rodar!",
+  "pedacos": [
+   "1.",
+   "Instalar.",
+   "2.",
+   "Configurar.",
+   "3.",
+   "Rodar!"
+  ]
+ },
+ {
+  "texto": "O valor é 3.14 e custa R$ 1.234,56. Ok?",
+  "pedacos": [
+   "O valor é 3.14 e custa R$ 1.234,56.",
+   "Ok?"
+  ]
+ },
+ {
+  "texto": "Reticências... no meio... e no fim…",
+  "pedacos": [
+   "Reticências...",
+   "no meio...",
+   "e no fim…"
+  ]
+ },
+ {
+  "texto": "Reticências unicode…seguidas sem espaço… e depois com espaço. Pronto",
+  "pedacos": [
+   "Reticências unicode…seguidas sem espaço…",
+   "e depois com espaço.",
+   "Pronto"
+  ]
+ },
+ {
+  "texto": "Dr. Silva chegou. Sra. Souza também.",
+  "pedacos": [
+   "Dr.",
+   "Silva chegou.",
+   "Sra.",
+   "Souza também."
+  ]
+ },
+ {
+  "texto": "",
+  "pedacos": []
+ },
+ {
+  "texto": "   ",
+  "pedacos": []
+ },
+ {
+  "texto": ".",
+  "pedacos": [
+   "."
+  ]
+ },
+ {
+  "texto": "Só uma palavra",
+  "pedacos": [
+   "Só uma palavra"
+  ]
+ },
+ {
+  "texto": "Pergunta?! Exclamação!? Mais?!! Fim.",
+  "pedacos": [
+   "Pergunta?!",
+   "Exclamação!?",
+   "Mais?!!",
+   "Fim."
+  ]
+ },
+ {
+  "texto": "Texto com\r\nquebra windows\r\ne mais uma linha.",
+  "pedacos": [
+   "Texto com",
+   "quebra windows",
+   "e mais uma linha."
+  ]
+ },
+ {
+  "texto": "Ponto e vírgula; sem espaço;depois. Dois-pontos:colados: separados.",
+  "pedacos": [
+   "Ponto e vírgula;",
+   "sem espaço;depois.",
+   "Dois-pontos:colados:",
+   "separados."
+  ]
+ },
+ {
+  "texto": "Acentuação: não, é, à, ç, ü. Também: pão, ação, coração.",
+  "pedacos": [
+   "Acentuação:",
+   "não, é, à, ç, ü.",
+   "Também:",
+   "pão, ação, coração."
+  ]
+ },
+ {
+  "texto": "Emoji 😀 no meio. Outro 🎉 aqui! Fim 🚀",
+  "pedacos": [
+   "Emoji 😀 no meio.",
+   "Outro 🎉 aqui!",
+   "Fim 🚀"
+  ]
+ },
+ {
+  "texto": "Espaço não separável aqui. E ideográfico　depois. Fim.",
+  "pedacos": [
+   "Espaço não separável aqui.",
+   "E ideográfico　depois.",
+   "Fim."
+  ]
+ },
+ {
+  "texto": "item numero 1 da lista, item numero 2 da lista, item numero 3 da lista, item numero 4 da lista, item numero 5 da lista, item numero 6 da lista, item numero 7 da lista, item numero 8 da lista, item numero 9 da lista, item numero 10 da lista, item numero 11 da lista, item numero 12 da lista, item numero 13 da lista, item numero 14 da lista, item numero 15 da lista, item numero 16 da lista, item numero 17 da lista, item numero 18 da lista, item numero 19 da lista, item numero 20 da lista, item numero 21 da lista, item numero 22 da lista, item numero 23 da lista, item numero 24 da lista, item numero 25 da lista, item numero 26 da lista, item numero 27 da lista, item numero 28 da lista, item numero 29 da lista",
+  "pedacos": [
+   "item numero 1 da lista, item numero 2 da lista, item numero 3 da lista, item numero 4 da lista, item numero 5 da lista, item numero 6 da lista, item numero 7 da lista, item numero 8 da lista, item numero 9 da lista, item numero 10 da lista, item",
+   "numero 11 da lista, item numero 12 da lista, item numero 13 da lista, item numero 14 da lista, item numero 15 da lista, item numero 16 da lista, item numero 17 da lista, item numero 18 da lista, item numero 19 da lista, item numero 20 da lista, item",
+   "numero 21 da lista, item numero 22 da lista, item numero 23 da lista, item numero 24 da lista, item numero 25 da lista, item numero 26 da lista, item numero 27 da lista, item numero 28 da lista, item numero 29 da lista"
+  ]
+ },
+ {
+  "texto": "item numero 1 da lista, item numero 2 da lista, item numero 3 da lista, item numero 4 da lista, item numero 5 da lista, item numero 6 da lista, item numero 7 da lista, item numero 8 da lista, item numero 9 da lista, item numero 10 da lista, item numero 11 da lista, item numero 12 da lista, item numero 13 da lista, item numero 14 da lista, item numero 15 da lista, item numero 16 da lista, item numero 17 da lista, item numero 18 da lista, item numero 19 da lista, item numero 20 da lista, item numero 21 da lista, item numero 22 da lista, item numero 23 da lista, item numero 24 da lista, item numero 25 da lista, item numero 26 da lista, item numero 27 da lista, item numero 28 da lista, item numero 29 da lista. Depois uma frase curta. item numero 1 da lista, item numero 2 da lista, item numero 3 da lista, item numero 4 da lista, item numero 5 da lista, item numero 6 da lista, item numero 7 da lista, item numero 8 da lista, item numero 9 da lista, item numero 10 da lista, item numero 11 da lista, item numero 12 da lista, item numero 13 da lista, item numero 14 da lista, item numero 15 da lista, item numero 16 da lista, item numero 17 da lista, item numero 18 da lista, item numero 19 da lista, item numero 20 da lista, item numero 21 da lista, item numero 22 da lista, item numero 23 da lista, item numero 24 da lista, item numero 25 da lista, item numero 26 da lista, item numero 27 da lista, item numero 28 da lista, item numero 29 da lista!",
+  "pedacos": [
+   "item numero 1 da lista, item numero 2 da lista, item numero 3 da lista, item numero 4 da lista, item numero 5 da lista, item numero 6 da lista, item numero 7 da lista, item numero 8 da lista, item numero 9 da lista, item numero 10 da lista, item",
+   "numero 11 da lista, item numero 12 da lista, item numero 13 da lista, item numero 14 da lista, item numero 15 da lista, item numero 16 da lista, item numero 17 da lista, item numero 18 da lista, item numero 19 da lista, item numero 20 da lista, item",
+   "numero 21 da lista, item numero 22 da lista, item numero 23 da lista, item numero 24 da lista, item numero 25 da lista, item numero 26 da lista, item numero 27 da lista, item numero 28 da lista, item numero 29 da lista.",
+   "Depois uma frase curta.",
+   "item numero 1 da lista, item numero 2 da lista, item numero 3 da lista, item numero 4 da lista, item numero 5 da lista, item numero 6 da lista, item numero 7 da lista, item numero 8 da lista, item numero 9 da lista, item numero 10 da lista, item",
+   "numero 11 da lista, item numero 12 da lista, item numero 13 da lista, item numero 14 da lista, item numero 15 da lista, item numero 16 da lista, item numero 17 da lista, item numero 18 da lista, item numero 19 da lista, item numero 20 da lista, item",
+   "numero 21 da lista, item numero 22 da lista, item numero 23 da lista, item numero 24 da lista, item numero 25 da lista, item numero 26 da lista, item numero 27 da lista, item numero 28 da lista, item numero 29 da lista!"
+  ]
+ },
+ {
+  "texto": "palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra",
+  "pedacos": [
+   "palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra",
+   "palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra",
+   "palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra palavra"
+  ]
+ },
+ {
+  "texto": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "pedacos": [
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  ]
+ },
+ {
+  "texto": "çãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoção",
+  "pedacos": [
+   "çãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoç",
+   "ãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoçãoção"
+  ]
+ },
+ {
+  "texto": "Sim, xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+  "pedacos": [
+   "Sim",
+   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+   "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+  ]
+ },
+ {
+  "texto": "lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum,",
+  "pedacos": [
+   "lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum",
+   "lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum, lorem ipsum",
+   "lorem ipsum, lorem ipsum"
+  ]
+ },
+ {
+  "texto": "abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd",
+  "pedacos": [
+   "abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd"
+  ]
+ },
+ {
+  "texto": "abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcde",
+  "pedacos": [
+   "abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcd abcde"
+  ]
+ },
+ {
+  "texto": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa, b resto do texto  resto do texto  resto do texto  resto do texto  resto do texto ",
+  "pedacos": [
+   "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+   "b resto do texto resto do texto resto do texto resto do texto resto do texto"
+  ]
+ },
+ {
+  "texto": "Parágrafo um bem comprido, com várias vírgulas, que segue, segue, segue e segue, sem nunca terminar, porque o autor gosta de frases longas, muito longas, enormes, daquelas que ninguém lê até o fim, mas que o sintetizador precisa tratar direito. Fim.\nParágrafo dois curto.",
+  "pedacos": [
+   "Parágrafo um bem comprido, com várias vírgulas, que segue, segue, segue e segue, sem nunca terminar, porque o autor gosta de frases longas, muito longas, enormes, daquelas que ninguém lê até o fim, mas que o sintetizador precisa tratar direito.",
+   "Fim.",
+   "Parágrafo dois curto."
+  ]
+ },
+ {
+  "texto": ", , , vírgulas soltas , , ,",
+  "pedacos": [
+   ", , , vírgulas soltas , , ,"
+  ]
+ },
+ {
+  "texto": "Fim com vírgula, ",
+  "pedacos": [
+   "Fim com vírgula,"
+  ]
+ },
+ {
+  "texto": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA B B B. CCCCCCCCCC",
+  "pedacos": [
+   "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+   "B B B.",
+   "CCCCCCCCCC"
+  ]
+ }
+]
