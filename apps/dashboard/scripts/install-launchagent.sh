@@ -101,7 +101,16 @@ fi
 
 if ! launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1; then
 	echo "==> Carregando $LABEL"
-	launchctl bootstrap "$DOMAIN" "$PLIST"
+	# O bootout volta antes de o launchd soltar o serviço; sem esperar, o bootstrap falha com "Bootstrap failed: 5".
+	for _ in $(seq 40); do
+		launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 || break
+		sleep 0.25
+	done
+	for tentativa in 1 2 3 4 5; do
+		erro="$(launchctl bootstrap "$DOMAIN" "$PLIST" 2>&1)" && break
+		[ "$tentativa" -lt 5 ] || { echo "Falha ao carregar $LABEL após 5 tentativas de launchctl bootstrap: $erro" >&2; exit 1; }
+		sleep 1
+	done
 fi
 
 echo "==> Reiniciando $LABEL"
