@@ -1,8 +1,11 @@
 //! `jarvis-fala-rs`: cliente fino do jarvisd (NDJSON v1 sobre socket Unix).
 //!
 //! Sem tokio e sem clap, para o start ser o menor possivel. Se o socket nao
-//! existir, nao aceitar ou nao responder `aceito` em 50 ms, faz `exec` do
-//! script legado (`fala-kokoro.sh`) com o mesmo texto e voz.
+//! existir ou recusar a conexao, faz `exec` do script legado
+//! (`fala-kokoro.sh`) na hora. Se conectar mas nao receber `aceito` em 300 ms,
+//! tambem cai no legado (o daemon cancela a fala ao ver a desconexao), exceto
+//! em `--sem-esperar`, onde nao ha cancelamento e portanto nao ha fallback
+//! (evita fala dupla). `--ping` so testa o daemon, sem fallback.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::Shutdown;
@@ -23,30 +26,50 @@ use signal_hook::iterator::Signals;
 /// primeiro) sair com 143 em vez de tratar como erro/fallback.
 static INTERROMPIDO: AtomicBool = AtomicBool::new(false);
 
-const PRAZO_ACEITO: Duration = Duration::from_millis(50);
+const PRAZO_ACEITO: Duration = Duration::from_millis(300);
+
+const USO: &str = "uso: jarvis-fala-rs [--sem-esperar|--primeiro-som] [--voz VOZ] [texto...]\n     jarvis-fala-rs --ping";
 
 struct Args {
     texto: Option<String>,
     voz: Option<String>,
     modo: Esperar,
+    ping: bool,
 }
 
-fn ler_args() -> Args {
+/// Junta os posicionais com espaco (como o `${*}` do jarvis-fala). A voz vem de
+/// `--voz X`/`--voz=X` ou de `JARVIS_TTS_VOICE`. `--` encerra as opcoes; outra
+/// opcao `--...` desconhecida sai com rc 2.
+fn ler_args<I: Iterator<Item = String>>(entrada: I) -> Result<Args, String> {
     let mut pos: Vec<String> = Vec::new();
     let mut modo = Esperar::Fim;
-    for a in std::env::args().skip(1) {
+    let mut voz = None;
+    let mut ping = false;
+    let mut it = entrada;
+    let mut opcoes = true;
+    while let Some(a) = it.next() {
+        if !opcoes || !a.starts_with("--") {
+            pos.push(a);
+            continue;
+        }
         match a.as_str() {
+            "--" => opcoes = false,
             "--sem-esperar" => modo = Esperar::Aceito,
             "--primeiro-som" => modo = Esperar::PrimeiroSom,
-            _ => pos.push(a),
+            "--ping" => ping = true,
+            "--voz" => voz = Some(it.next().ok_or("--voz sem valor")?),
+            _ => match a.strip_prefix("--voz=") {
+                Some(v) => voz = Some(v.to_string()),
+                None => return Err(format!("opcao desconhecida: {a}")),
+            },
         }
     }
-    let mut it = pos.into_iter();
-    Args {
-        texto: it.next(),
-        voz: it.next(),
+    Ok(Args {
+        texto: (!pos.is_empty()).then(|| pos.join(" ")),
+        voz,
         modo,
-    }
+        ping,
+    })
 }
 
 fn home() -> PathBuf {
@@ -76,8 +99,56 @@ fn fallback(texto: &str, voz: Option<&str>) -> ! {
     exit(rc::ERRO);
 }
 
+/// Conectou, mas o `aceito` nao veio. Com cancelamento ligado o daemon descarta
+/// a fala ao ver a desconexao, entao o legado nao duplica. Em `--sem-esperar`
+/// nao ha cancelamento: sem fallback, para nao falar duas vezes.
+fn sem_aceito(texto: &str, voz: Option<&str>, sem_esperar: bool) -> ! {
+    if sem_esperar {
+        eprintln!("jarvis-fala-rs: sem `aceito` do daemon; sem fallback em --sem-esperar");
+        exit(rc::ERRO);
+    }
+    fallback(texto, voz)
+}
+
+fn socket() -> PathBuf {
+    env_nao_vazia("JARVIS_FALA_SOCK")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home().join(".local/share/jarvis/poc/jarvisd.sock"))
+}
+
+/// `--ping`: 0 no pong, 1 em qualquer outro caso. Nunca fala nem cai no legado.
+fn ping() -> ! {
+    let Ok(mut stream) = UnixStream::connect(socket()) else {
+        exit(1);
+    };
+    let _ = stream.set_write_timeout(Some(PRAZO_ACEITO));
+    let _ = stream.set_read_timeout(Some(PRAZO_ACEITO));
+    let req = Requisicao::nova(format!("ping-{}", std::process::id()), Op::Ping);
+    let linha = codificar(&req).expect("requisicao serializavel");
+    if stream.write_all(linha.as_bytes()).is_err() {
+        exit(1);
+    }
+    let mut buf = String::new();
+    if BufReader::new(stream).read_line(&mut buf).is_err() {
+        exit(1);
+    }
+    match decodificar::<Mensagem>(&buf) {
+        Ok(m) if matches!(m.ev, Evento::Pong) => exit(0),
+        _ => exit(1),
+    }
+}
+
 fn main() {
-    let args = ler_args();
+    let args = match ler_args(std::env::args().skip(1)) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("jarvis-fala-rs: {e}\n{USO}");
+            exit(2);
+        }
+    };
+    if args.ping {
+        ping();
+    }
     let texto = match args.texto {
         Some(t) => t,
         None => {
@@ -92,13 +163,12 @@ fn main() {
     let voz = args.voz.or_else(|| env_nao_vazia("JARVIS_TTS_VOICE"));
     let verboso = std::env::var("JARVIS_FALA_VERBOSO").is_ok_and(|v| v == "1");
 
-    let sock = env_nao_vazia("JARVIS_FALA_SOCK")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(".local/share/jarvis/poc/jarvisd.sock"));
-    let Ok(mut stream) = UnixStream::connect(&sock) else {
+    // Connect recusado ou socket inexistente: fallback imediato.
+    let Ok(mut stream) = UnixStream::connect(socket()) else {
         fallback(&texto, voz.as_deref());
     };
 
+    let sem_esperar = args.modo == Esperar::Aceito;
     let id = format!("cli-{}", std::process::id());
     let req = Requisicao::nova(
         id,
@@ -109,12 +179,16 @@ fn main() {
             origem: Some("jarvis-fala-rs".into()),
             esperar: args.modo,
             prazo_fila_s: None,
-            cancelar_ao_desconectar: Some(args.modo != Esperar::Aceito),
+            // `--sem-esperar` sai logo apos o `aceito`; com cancelamento ligado o
+            // daemon cancelaria a fala nessa saida. Nos demais modos, true: se o
+            // `aceito` atrasar e cairmos no legado, o daemon cancela a fala.
+            cancelar_ao_desconectar: Some(!sem_esperar),
         },
     );
     let linha = codificar(&req).expect("requisicao serializavel");
     let _ = stream.set_write_timeout(Some(PRAZO_ACEITO));
     if stream.write_all(linha.as_bytes()).is_err() {
+        // Nada foi entregue ao daemon (escrita falhou): seguro cair no legado.
         fallback(&texto, voz.as_deref());
     }
     let _ = stream.set_write_timeout(None);
@@ -144,13 +218,13 @@ fn main() {
         match lido {
             Ok(0) => {
                 if !aceito {
-                    fallback(&texto, voz.as_deref());
+                    sem_aceito(&texto, voz.as_deref(), sem_esperar);
                 }
                 eprintln!("jarvis-fala-rs: conexao encerrada antes do fim");
                 exit(rc::ERRO);
             }
             Ok(_) => {}
-            Err(_) if !aceito => fallback(&texto, voz.as_deref()),
+            Err(_) if !aceito => sem_aceito(&texto, voz.as_deref(), sem_esperar),
             Err(e) => {
                 eprintln!("jarvis-fala-rs: erro de leitura: {e}");
                 exit(rc::ERRO);

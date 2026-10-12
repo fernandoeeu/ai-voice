@@ -57,7 +57,10 @@ fn cli(sock: &Path) -> Command {
 fn argumento_e_voz() {
     let d = TempDir::new().unwrap();
     let (rx, sock) = servidor(d.path(), vec![aceito(), fim(0)]);
-    cli(&sock).args(["ola mundo", "pf_dora"]).assert().code(0);
+    cli(&sock)
+        .args(["--voz", "pf_dora", "ola mundo"])
+        .assert()
+        .code(0);
     let req = rx.recv().unwrap();
     assert_eq!(req["op"], "falar");
     assert_eq!(req["texto"], "ola mundo");
@@ -160,7 +163,8 @@ fn sem_socket_faz_exec_do_legado() {
     std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
     let out = cli(&d.path().join("nada.sock"))
         .env("JARVIS_FALA_LEGADO", &script)
-        .args(["oi", "pf_dora"])
+        .env("JARVIS_TTS_VOICE", "pf_dora")
+        .arg("oi")
         .assert()
         .code(7);
     assert_eq!(
@@ -185,4 +189,122 @@ fn servidor_mudo_cai_no_legado() {
         String::from_utf8_lossy(&out.get_output().stdout).trim(),
         "legado:via stdin"
     );
+}
+
+/// Servidor falso que atrasa o `aceito` e registra se a conexao caiu antes dele.
+fn servidor_lento(dir: &Path, atraso: Duration) -> (mpsc::Receiver<Value>, std::path::PathBuf) {
+    let sock = dir.join("lento.sock");
+    let l = UnixListener::bind(&sock).unwrap();
+    let (tx, rx) = mpsc::channel();
+    thread::spawn(move || {
+        let (mut s, _) = l.accept().unwrap();
+        let mut r = BufReader::new(s.try_clone().unwrap());
+        let mut linha = String::new();
+        r.read_line(&mut linha).unwrap();
+        tx.send(serde_json::from_str(&linha).unwrap()).unwrap();
+        thread::sleep(atraso);
+        let _ = writeln!(s, "{}", aceito());
+        let _ = writeln!(s, "{}", fim(0));
+    });
+    (rx, sock)
+}
+
+#[test]
+fn aceito_atrasado_dentro_do_prazo_nao_cai_no_legado() {
+    // 100 ms > os antigos 50 ms, mas < 300 ms: nada de fallback nem fala dupla.
+    let d = TempDir::new().unwrap();
+    let script = d.path().join("legado.sh");
+    std::fs::write(&script, "#!/bin/sh\necho legado\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (rx, sock) = servidor_lento(d.path(), Duration::from_millis(100));
+    let out = cli(&sock)
+        .env("JARVIS_FALA_LEGADO", &script)
+        .arg("oi")
+        .assert()
+        .code(0);
+    assert!(out.get_output().stdout.is_empty());
+    let req = rx.recv().unwrap();
+    assert_eq!(req["cancelar_ao_desconectar"], true);
+}
+
+#[test]
+fn aceito_muito_atrasado_cai_no_legado_com_cancelamento() {
+    let d = TempDir::new().unwrap();
+    let script = d.path().join("legado.sh");
+    std::fs::write(&script, "#!/bin/sh\necho legado\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (rx, sock) = servidor_lento(d.path(), Duration::from_millis(1500));
+    let out = cli(&sock)
+        .env("JARVIS_FALA_LEGADO", &script)
+        .arg("oi")
+        .assert()
+        .code(0);
+    assert_eq!(
+        String::from_utf8_lossy(&out.get_output().stdout).trim(),
+        "legado"
+    );
+    // O daemon so cancela porque o pedido pediu `cancelar_ao_desconectar`.
+    assert_eq!(rx.recv().unwrap()["cancelar_ao_desconectar"], true);
+}
+
+#[test]
+fn sem_esperar_sem_aceito_nao_faz_fallback() {
+    let d = TempDir::new().unwrap();
+    let script = d.path().join("legado.sh");
+    std::fs::write(&script, "#!/bin/sh\necho legado\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let (rx, sock) = servidor_lento(d.path(), Duration::from_millis(1500));
+    let out = cli(&sock)
+        .env("JARVIS_FALA_LEGADO", &script)
+        .args(["--sem-esperar", "oi"])
+        .assert()
+        .code(1);
+    assert!(out.get_output().stdout.is_empty());
+    // Sem cancelamento no daemon, o fallback duplicaria a fala: por isso nao ha.
+    assert_eq!(rx.recv().unwrap()["cancelar_ao_desconectar"], false);
+}
+
+#[test]
+fn ping_responde_pong() {
+    let d = TempDir::new().unwrap();
+    let (rx, sock) = servidor(d.path(), vec![json!({"v":1,"id":"x","ev":"pong"})]);
+    cli(&sock).arg("--ping").assert().code(0);
+    assert_eq!(rx.recv().unwrap()["op"], "ping");
+}
+
+#[test]
+fn ping_falha_sem_fallback() {
+    let d = TempDir::new().unwrap();
+    let script = d.path().join("legado.sh");
+    std::fs::write(&script, "#!/bin/sh\necho legado\n").unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Sem socket.
+    let out = cli(&d.path().join("nada.sock"))
+        .env("JARVIS_FALA_LEGADO", &script)
+        .arg("--ping")
+        .assert()
+        .code(1);
+    assert!(out.get_output().stdout.is_empty());
+    // Resposta que nao e pong.
+    let (_rx, sock) = servidor(d.path(), vec![aceito()]);
+    cli(&sock).arg("--ping").assert().code(1);
+}
+
+#[test]
+fn flag_desconhecida_sai_com_2() {
+    let d = TempDir::new().unwrap();
+    let (rx, sock) = servidor(d.path(), vec![aceito(), fim(0)]);
+    let out = cli(&sock).args(["--help", "oi"]).assert().code(2);
+    assert!(String::from_utf8_lossy(&out.get_output().stderr).contains("uso:"));
+    assert!(rx.recv_timeout(Duration::from_millis(300)).is_err());
+}
+
+#[test]
+fn varios_posicionais_viram_um_texto() {
+    let d = TempDir::new().unwrap();
+    let (rx, sock) = servidor(d.path(), vec![aceito(), fim(0)]);
+    cli(&sock).args(["ola", "mundo", "cruel"]).assert().code(0);
+    let req = rx.recv().unwrap();
+    assert_eq!(req["texto"], "ola mundo cruel");
+    assert!(req.get("voz").is_none_or(Value::is_null));
 }
