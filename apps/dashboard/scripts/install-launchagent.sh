@@ -40,7 +40,9 @@ fi
 # O build empacotado não leva os fontes Swift do helper do Calendário; o servidor
 # usa o binário já compilado em ~/.local/share/jarvis/bin/calendar-events.
 echo "==> Helper do Calendário"
-(cd "$APP_DIR/../../packages/apple" && "$BUN" run build:native)
+# Sem as Xcode Command Line Tools o helper não compila; o dashboard sobe mesmo assim (o onboarding oferece instalar).
+(cd "$APP_DIR/../../packages/apple" && "$BUN" run build:native) ||
+	echo "aviso: o helper do Calendário não compilou (faltam as Xcode Command Line Tools?); a Agenda fica sem dados" >&2
 
 echo "==> Publicando o build em $RELEASE_DIR"
 mkdir -p "$APP_DIR/.local"
