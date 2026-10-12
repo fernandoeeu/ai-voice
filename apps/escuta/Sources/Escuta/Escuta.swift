@@ -116,6 +116,16 @@ final class Escuta: ObservableObject {
     private var overlapped = false
     private var finalizeAt: Date?
     private var finalizeDone = false
+    /// Silêncio real (medidor ou VAD) que fecha a frase: nunca menos que isto, para a pausa de respiração não cortar.
+    static let hangover = 1.2
+    /// Resultados finais que chegam a menos disto um do outro são a mesma frase.
+    static let mergeWindow = 1.5
+    /// Início de voz exige este tanto seguido acima do limiar (clique ou estalo isolado não conta).
+    static let voiceOnset = 0.06
+    private var voiceRun = 0.0
+    private var lastFinalAt = Date.distantPast
+    /// Trecho ainda em revisão que foi enviado no fechamento: se o final dele chegar depois, não vira frase nova.
+    private var flushedVolatile: (text: String, at: Date)?
     private let lockQueue = DispatchQueue(label: "escuta.fala-lock")
 
     var isPaused: Bool { phase == .paused }
@@ -386,11 +396,18 @@ final class Escuta: ObservableObject {
         let rms = sqrt(sum / Float(max(n, 1)))
         let db = 20 * log10(max(rms, 1e-6))
         let level = max(0, min(1, (db + 60) / 50))
+        let seconds = Double(n) / buffer.format.sampleRate
         DispatchQueue.main.async {
             self.peakDB = max(self.peakDB, db)
             // Piso de ruído: desce rápido, sobe devagar. Voz = bem acima do piso.
             self.noiseFloor = db < self.noiseFloor ? db : min(db, self.noiseFloor + 0.05)
-            if !self.recognizer.hasVAD, db > -48, db > self.noiseFloor + 15 { self.lastVoiceAt = Date() }
+            // Limiar relativo ao piso calibrado, sem o -48 dB fixo: o HyperX fala a -60..-37 dB e entre as
+            // palavras manda silêncio digital; com -48 o medidor ficava surdo e a frase fechava no meio da palavra.
+            let isVoice = db > max(self.noiseFloor + 15, -90)
+            self.voiceRun = isVoice ? self.voiceRun + seconds : 0
+            // Já falando, cada bloco com voz renova; para começar, ~60 ms seguidos.
+            let speaking = Date().timeIntervalSince(self.lastVoiceAt) < 0.3
+            if !self.recognizer.hasVAD, isVoice, speaking || self.voiceRun >= Self.voiceOnset { self.lastVoiceAt = Date() }
             self.levels.removeFirst()
             self.levels.append(level)
         }
@@ -556,10 +573,23 @@ final class Escuta: ObservableObject {
         let current = e.generation == recognizer.generation
         // Resultado parcial de uma tarefa já trocada: a nova é quem manda agora.
         if !current && !e.isFinal { return }
-        let text = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var text = e.text.trimmingCharacters(in: .whitespacesAndNewlines)
         if e.isFinal { finals += 1 } else { partials += 1 }
         if e.isFinal {
-            if !text.isEmpty { segments.append(text) }
+            lastFinalAt = Date()
+            // Final atrasado do trecho que já foi enviado em revisão no fechamento: já está no pedido.
+            if utteranceStart == nil, let f = flushedVolatile, Date().timeIntervalSince(f.at) < 4,
+               Self.sameWords(text, f.text) {
+                logLine("final repetido do trecho já enviado, ignorado: \"\(text)\"")
+                flushedVolatile = nil
+                return
+            }
+            // Tarefa nova com pré-roll: o começo dela pode repetir as últimas palavras do trecho anterior.
+            if let r = recognizer as? Recognizer, Date().timeIntervalSince(r.lastStartAt) < 8, let prev = segments.last {
+                text = Self.dropOverlap(prev, text)
+            }
+            // Só pontuação ("." que o reconhecedor solta no silêncio) não é fala.
+            if text.rangeOfCharacter(from: .alphanumerics) != nil { segments.append(text) }
             if current { livePartial = "" }
         } else {
             livePartial = text
@@ -586,6 +616,29 @@ final class Escuta: ObservableObject {
         if Wake.leading(w) != nil, lastWakeAt.map({ Date().timeIntervalSince($0) > 2 }) ?? true { lastWakeAt = Date() }
     }
 
+    private static func words(_ s: String) -> [String] {
+        s.lowercased().components(separatedBy: CharacterSet.alphanumerics.inverted).filter { !$0.isEmpty }
+    }
+
+    /// Mesmas palavras, ignorando pontuação e maiúsculas (ou uma começando pela outra).
+    static func sameWords(_ a: String, _ b: String) -> Bool {
+        let x = words(a).joined(separator: " "), y = words(b).joined(separator: " ")
+        guard !x.isEmpty, !y.isEmpty else { return false }
+        return x == y || x.hasPrefix(y) || y.hasPrefix(x)
+    }
+
+    /// Tira do começo de `next` as palavras (até 3) que repetem o fim de `prev` (sobreposição do pré-roll).
+    static func dropOverlap(_ prev: String, _ next: String) -> String {
+        let p = words(prev)
+        let parts = next.split(separator: " ", omittingEmptySubsequences: true)
+        let n = parts.map { words(String($0)).joined() }
+        for k in stride(from: min(3, p.count, n.count), through: 1, by: -1)
+            where Array(p.suffix(k)) == Array(n.prefix(k)) {
+            return parts.dropFirst(k).joined(separator: " ")
+        }
+        return next
+    }
+
     /// A tarefa de reconhecimento caiu: o trecho ainda em revisão vira definitivo, para não sumir.
     private func keepVolatileText() {
         if !livePartial.isEmpty { segments.append(livePartial); livePartial = "" }
@@ -602,15 +655,38 @@ final class Escuta: ObservableObject {
         if let start = utteranceStart, !whole.isEmpty {
             // O texto chega até ~2 s depois do som: voz pouco antes do começo do texto também conta.
             if lastVoiceAt > start.addingTimeInterval(-2.5) { voiceInUtterance = true }
-            // Silêncio pelo medidor do microfone (tempo real). Se o medidor se confundir com ruído de fundo,
-            // o texto parado também conta como silêncio, com 1,5 s de folga para o atraso do reconhecedor.
-            let silence = recognizer.hasVAD ? now.timeIntervalSince(lastVoiceAt)
-                : max(now.timeIntervalSince(lastVoiceAt), now.timeIntervalSince(lastTextChangeAt) - 1.5)
+            // Fim de fala pelo silêncio real (VAD, ou medidor com limiar relativo ao piso calibrado):
+            // só 1,2 s ou mais fecha; pausa de respiração não. Pedir os finais com voz no microfone cortava
+            // a palavra ao meio: o fim ia numa frase e o começo da seguinte saía mutilado.
+            let sinceVoice = now.timeIntervalSince(lastVoiceAt)
+            let sinceText = now.timeIntervalSince(lastTextChangeAt)
+            let meterHeard = lastVoiceAt > start.addingTimeInterval(-2.5)
+            let silence: Double
+            if recognizer.hasVAD {
+                silence = sinceVoice
+            } else if meterHeard {
+                // Ruído contínuo confundindo o medidor: texto parado há 4 s também vale como silêncio.
+                silence = max(sinceVoice, sinceText - 2.7)
+            } else {
+                // O medidor não ouviu esta frase (calibrando): só o texto parado conta, com folga de 2,5 s.
+                silence = sinceText - 1.2
+            }
             let activityAt = now.addingTimeInterval(-silence)
             let sinceFinalize = finalizeAt.flatMap { $0 > activityAt && finalizeDone ? now.timeIntervalSince($0) : nil }
-            let d = Endpoint.decide(text: whole, volatile: !livePartial.isEmpty, silence: silence,
-                                    sinceText: now.timeIntervalSince(lastTextChangeAt), sinceFinalize: sinceFinalize,
-                                    elapsed: now.timeIntervalSince(start), config: config.endpoint)
+            var ep = config.endpoint
+            ep.silence = max(ep.silence, Self.hangover)
+            ep.openSilence = max(ep.openSilence, ep.silence)
+            var d = Endpoint.decide(text: whole, volatile: !livePartial.isEmpty, silence: silence,
+                                    sinceText: sinceText, sinceFinalize: sinceFinalize,
+                                    elapsed: now.timeIntervalSince(start), config: ep)
+            // Finais a menos de 1,5 s um do outro são a mesma frase: espera a janela passar antes de fechar.
+            // O final que veio do nosso pedido de finalização (com o silêncio confirmado) não reabre a janela;
+            // senão todo fim de fala ganhava 1,5 s a mais e frases separadas por 2 s se juntavam.
+            let askedFinal = (meterHeard || recognizer.hasVAD) && finalizeAt.map { lastFinalAt >= $0 } == true
+            if case .close = d, now.timeIntervalSince(start) < ep.maxUtterance, !askedFinal,
+               now.timeIntervalSince(lastFinalAt) < Self.mergeWindow {
+                d = .wait
+            }
             switch d {
             case .wait: break
             case .finalize:
@@ -644,6 +720,7 @@ final class Escuta: ObservableObject {
     @MainActor
     private func flush(reason: String) {
         let text = whole.trimmingCharacters(in: .whitespacesAndNewlines)
+        flushedVolatile = livePartial.isEmpty ? nil : (livePartial, Date())
         let began = utteranceStart ?? Date()
         let duration = Date().timeIntervalSince(began)
         segments = []; livePartial = ""; lastWhole = ""; utteranceStart = nil; partial = ""
