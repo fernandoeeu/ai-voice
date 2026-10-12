@@ -80,7 +80,6 @@ struct Config {
         // Env ESCUTA_SILENCIO / ESCUTA_SILENCIO_ABERTA (se definidos) vencem estes padrões.
         if c.stt == "parakeet" {
             if num("ESCUTA_SILENCIO") == nil { c.endpoint.silence = 1.0 }
-            if num("ESCUTA_SILENCIO_ABERTA") == nil { c.endpoint.openSilence = 2.2 }
         }
         return c
     }
