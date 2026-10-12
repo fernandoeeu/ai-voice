@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Vigia do maestro (LaunchAgent dev.jarvis.maestro, StartInterval 60): uma
- * passada por execução. Se o agente sumiu do herdr, recria o pane e retoma a
- * sessão salva. Com o herdr fora do ar, só registra e sai.
+ * Vigia dos agentes do herdr (LaunchAgent dev.jarvis.maestro, StartInterval 60):
+ * uma passada por execução sobre o maestro e os especialistas de agentes.json.
+ * Quem sumiu é recriado no pane salvo (ou ao lado) e retoma a própria sessão.
  */
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { Cause, Effect, Layer, Logger, Option } from "effect"
@@ -12,10 +12,14 @@ import { vigiar } from "./vigia.ts"
 
 const main = Effect.gen(function*() {
   const config = yield* MaestroConfig
-  const resultado = yield* vigiar(config).pipe(Effect.provide(Herdr.layer(config.herdr)))
-  if (resultado._tag === "Recriado") {
-    const sessao = Option.match(resultado.retomou, { onNone: () => "sessão nova", onSome: (id) => `retomou ${id}` })
-    yield* Effect.logInfo(`Agente ${config.name} recriado no pane ${resultado.pane} (${sessao}).`)
+  const resultados = yield* vigiar(config).pipe(Effect.provide(Herdr.layer(config.herdr)))
+  for (const resultado of resultados) {
+    if (resultado._tag === "Recriado") {
+      const sessao = Option.match(resultado.retomou, { onNone: () => "sessão nova", onSome: (id) => `retomou ${id}` })
+      yield* Effect.logInfo(`Agente ${resultado.nome} recriado no pane ${resultado.pane} (${sessao}).`)
+    } else if (resultado._tag === "Falhou") {
+      yield* Effect.logWarning(`Agente ${resultado.nome} não subiu: ${resultado.erro}`)
+    }
   }
 })
 

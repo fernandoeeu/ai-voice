@@ -93,6 +93,8 @@ done
 
 [ "${1:-}" = "--dry-run" ] && exit 0
 [ -f "$DIR/rotinas.json" ] || install -m 600 "$REPO/apps/maestro/rotinas.example.json" "$DIR/rotinas.json"
+[ -f "$DIR/agentes.json" ] || install -m 600 "$REPO/apps/maestro/agentes.example.json" "$DIR/agentes.json"
+echo "Especialistas: $DIR/agentes.json (o vigia cria e supervisiona cada um ao lado do maestro)"
 echo "Rotinas: $DIR/rotinas.json"
 echo "URL de eventos: $(cd "$REPO/apps/maestro" && JARVIS_MAESTRO_DIR="$DIR" JARVIS_EVENTOS_PORT="$PORT" "$BUN" src/eventos-main.ts --print-url)"
 echo "Hooks para o ~/.claude/settings.json (dentro de \"hooks\"): apps/maestro/install.sh --hooks"

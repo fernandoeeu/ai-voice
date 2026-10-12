@@ -40,5 +40,8 @@ export const paths = (dir: string) => ({
   fila: join(dir, "fila.json"),
   rotinas: join(dir, "rotinas.json"),
   rotinasEstado: join(dir, "rotinas-estado.json"),
-  token: join(dir, "eventos-token")
+  token: join(dir, "eventos-token"),
+  agentes: join(dir, "agentes.json"),
+  /** Pasta própria de cada especialista: casa, sessão, pane e estado. */
+  especialista: (nome: string) => join(dir, "agentes", nome)
 })

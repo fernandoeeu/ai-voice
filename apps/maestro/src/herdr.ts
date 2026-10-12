@@ -146,12 +146,17 @@ export const listPanes = (workspace: string) =>
     return panes
   })
 
-/** Abre um pane novo ao lado de `pane` (à direita, sem tirar o foco) e devolve o id. */
-export const splitPane = (options: { pane: string; cwd: string; env: Readonly<Record<string, string>> }) =>
+/** Abre um pane novo ao lado de `pane` (à direita ou abaixo, sem tirar o foco) e devolve o id. */
+export const splitPane = (options: {
+  pane: string
+  cwd: string
+  env: Readonly<Record<string, string>>
+  direction?: "right" | "down"
+}) =>
   Effect.gen(function*() {
     const herdr = yield* Herdr
     const result = yield* herdr.call([
-      "pane", "split", "--pane", options.pane, "--direction", "right", "--cwd", options.cwd, "--no-focus",
+      "pane", "split", "--pane", options.pane, "--direction", options.direction ?? "right", "--cwd", options.cwd, "--no-focus",
       ...envArgs(options.env)
     ])
     const { pane } = yield* decode(Schema.Struct({ pane: Pane }))(result)

@@ -8,7 +8,9 @@ import { decidir } from "../src/entrega.ts"
 import { formatarEntrega, limparOrigem } from "../src/fila.ts"
 import { atualizarAuto, AUTO_FIM, AUTO_INICIO, ehMaestro, ehSessaoDoMaestro, renderizar, resumirTranscript } from "../src/memoria.ts"
 import { devidas, type Rotina } from "../src/rotinas.ts"
-import { argsClaude } from "../src/vigia.ts"
+import { AgentesJson, alvoEspecialista, argsClaude, hooksSettings, REPO } from "../src/vigia.ts"
+import { readFileSync } from "node:fs"
+import { Schema } from "effect"
 
 describe("decidir", () => {
   const base = { pendentes: 2, avisado: false }
@@ -132,5 +134,35 @@ describe("vigia", () => {
 describe("config", () => {
   it("usa a 7353, fora das portas do Grafana (7351) e do coletor (7352)", () => {
     expect(DEFAULT_PORT).toBe(7353)
+  })
+})
+
+describe("especialistas", () => {
+  const config = {
+    name: "maestro", dir: "/m", workspace: "ai-voice", herdr: "/h", fala: "/f", port: 7353, settings: ""
+  }
+  it("o exemplo de agentes.json é válido e traz os três especialistas", () => {
+    const texto = readFileSync(new URL("../agentes.example.json", import.meta.url), "utf8")
+    const { agentes } = Schema.decodeUnknownSync(AgentesJson)(texto)
+    expect(agentes.map((a) => a.nome)).toEqual(["otimizacao", "escuta-voz", "telemetria"])
+  })
+  it("recusa nome que o herdr não aceita", () => {
+    expect(() => Schema.decodeUnknownSync(AgentesJson)('{"agentes":[{"nome":"Ruim!","papel":"p","prompt":"x"}]}')).toThrow()
+  })
+  it("cada especialista tem pasta, prompt e acesso ao repositório próprios", () => {
+    const alvo = alvoEspecialista(config, { nome: "telemetria", papel: "painéis", prompt: "cuide" })
+    expect(alvo.dir).toBe("/m/agentes/telemetria")
+    expect(alvo.valores).toMatchObject({ NOME: "telemetria", PAPEL: "painéis", PROMPT: "cuide", MAESTRO: "maestro", REPO })
+    expect(alvo.addDirs).toEqual([REPO])
+    expect(REPO.endsWith("ai-voice")).toBe(true)
+  })
+})
+
+describe("hooks dos agentes do vigia", () => {
+  it("aponta SessionStart e PreCompact para os scripts do repositório", () => {
+    const { hooks } = hooksSettings("/bun")
+    expect(hooks.SessionStart[0]!.matcher).toBe("startup|resume|compact|clear")
+    expect(hooks.SessionStart[0]!.hooks[0]!.command).toBe(`/bun ${REPO}/apps/maestro/src/hooks/session-start.ts`)
+    expect(hooks.PreCompact[0]!.hooks[0]!.command).toBe(`/bun ${REPO}/apps/maestro/src/hooks/pre-compact.ts`)
   })
 })
