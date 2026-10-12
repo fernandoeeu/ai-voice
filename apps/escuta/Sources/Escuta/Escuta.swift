@@ -418,6 +418,9 @@ final class Escuta: ObservableObject {
         // Sem filtro de eco, por ordem do dono: qualquer fala com palavras corta a fala do Jarvis.
         let owner = text
         guard !BargeIn.isNoise(owner) else { return }
+        // Palavra solta sem voz agora no microfone ou com confiança baixa não corta o Jarvis.
+        let voiceNow = Date().timeIntervalSince(lastVoiceAt) < 1.5
+        guard !BargeIn.isWeak(owner, confidence: liveConfidence, hadVoice: voiceNow) else { return }
         bargedIn = true
         let path = config.speechLock
         let t0 = Date()
@@ -433,6 +436,14 @@ final class Escuta: ObservableObject {
     }
 
     private var framesOutTotal = 0
+    private var segConfidences: [Double] = []
+    private var liveConfidence: Double?
+    private var voiceInUtterance = false
+    /// Confiança média da fala em andamento (trechos finais e o trecho em revisão).
+    private var utteranceConfidence: Double? {
+        let all = segConfidences + (liveConfidence.map { [$0] } ?? [])
+        return all.isEmpty ? nil : all.reduce(0, +) / Double(all.count)
+    }
     private var lastSpokenTs: Double = 0
 
     // MARK: Transcrição e fim de fala
@@ -444,6 +455,10 @@ final class Escuta: ObservableObject {
         let wake = Wake.prefix(owner)
         let rest = Wake.stripPrefix(owner)
         if BargeIn.isNoise(rest) { return (wake, nil, false) }
+        if BargeIn.isWeak(rest, confidence: utteranceConfidence, hadVoice: voiceInUtterance) {
+            logLine("descartada por ser curta e sem voz ou com confiança baixa: \"\(rest)\" (confiança \(utteranceConfidence.map { String(format: "%.2f", $0) } ?? "-"), voz \(voiceInUtterance))")
+            return (wake, nil, false)
+        }
         // "Para", "chega" soltos enquanto o Jarvis falava só calam o Jarvis.
         if overlapped && BargeIn.isOnlyStop(rest) { return (wake, nil, false) }
         return (wake, rest, false)
@@ -468,7 +483,12 @@ final class Escuta: ObservableObject {
         }
         let w = whole
         partial = w
-        if ProcessInfo.processInfo.environment["ESCUTA_DEBUG"] != nil { logLine("evento final=\(e.isFinal) falando=\(jarvisSpeaking) texto=\(text)") }
+        if ProcessInfo.processInfo.environment["ESCUTA_DEBUG"] != nil {
+            logLine("evento final=\(e.isFinal) falando=\(jarvisSpeaking) conf=\(e.confidence.map { String(format: "%.2f", $0) } ?? "-") texto=\(text)")
+        }
+        if e.isFinal { if let c = e.confidence, !text.isEmpty { segConfidences.append(c) } ; liveConfidence = nil }
+        else { liveConfidence = e.confidence }
+        if Date().timeIntervalSince(lastVoiceAt) < 2.5 { voiceInUtterance = true }
         checkBargeIn(text)
         guard w != lastWhole else { return }
         lastWhole = w
@@ -497,6 +517,8 @@ final class Escuta: ObservableObject {
             if phase == .armed { phase = .listening }
         }
         if let start = utteranceStart, !whole.isEmpty {
+            // O texto chega até ~2 s depois do som: voz pouco antes do começo do texto também conta.
+            if lastVoiceAt > start.addingTimeInterval(-2.5) { voiceInUtterance = true }
             // Silêncio pelo medidor do microfone (tempo real). Se o medidor se confundir com ruído de fundo,
             // o texto parado também conta como silêncio, com 1,5 s de folga para o atraso do reconhecedor.
             let silence = max(now.timeIntervalSince(lastVoiceAt), now.timeIntervalSince(lastTextChangeAt) - 1.5)
@@ -543,6 +565,7 @@ final class Escuta: ObservableObject {
         capturing = false
         let wasOverlapped = overlapped
         overlapped = false
+        defer { segConfidences = []; liveConfidence = nil; voiceInUtterance = false }
         guard !text.isEmpty else { return }
         let d = decide(text, startedAt: began, overlapped: wasOverlapped)
         if d.wake != nil { lastWakeAt = Date() }
@@ -553,7 +576,8 @@ final class Escuta: ObservableObject {
         }
         heard.insert(Heard(at: Date(), text: text, wakeRange: d.wake, command: d.command), at: 0)
         if heard.count > 12 { heard.removeLast() }
-        emit(["type": "heard", "text": text, "wake": d.wake != nil, "end": reason, "during_speech": wasOverlapped, "seconds": (duration * 10).rounded() / 10])
+        emit(["type": "heard", "text": text, "wake": d.wake != nil, "end": reason, "during_speech": wasOverlapped,
+              "confidence": utteranceConfidence ?? -1, "voice": voiceInUtterance, "sent": d.command != nil, "seconds": (duration * 10).rounded() / 10])
         if let c = d.command, !c.isEmpty { send(c) }
     }
 

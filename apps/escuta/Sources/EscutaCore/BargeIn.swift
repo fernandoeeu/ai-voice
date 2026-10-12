@@ -21,4 +21,14 @@ public enum BargeIn {
         let w = words(text).filter { !["ai", "ja", "por", "favor", "jarvis", "camarada"].contains($0) }
         return !w.isEmpty && w.allSatisfy { stopWords.contains($0) }
     }
+
+    /// Fala curta demais para confiar: até duas palavras sem voz no microfone durante ela, ou com
+    /// confiança baixa do reconhecedor. É o "Não." que o reconhecedor inventa em ruído.
+    public static func isWeak(_ text: String, confidence: Double?, hadVoice: Bool, minConfidence: Double = 0.6) -> Bool {
+        let n = words(text).count
+        guard n <= 2 else { return false }
+        if !hadVoice { return true }
+        if let c = confidence, c < minConfidence { return true }
+        return false
+    }
 }

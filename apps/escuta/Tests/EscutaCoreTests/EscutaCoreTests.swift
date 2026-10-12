@@ -98,6 +98,14 @@ import Testing
 }
 
 @Suite struct BargeInTests {
+    @Test func palavraSoltaSemVozNaoValeNada() {
+        // O "Não." que o reconhecedor inventou com o microfone em silêncio.
+        #expect(BargeIn.isWeak("Não.", confidence: 0.9, hadVoice: false))
+        #expect(BargeIn.isWeak("Não", confidence: 0.3, hadVoice: true))
+        #expect(!BargeIn.isWeak("Não", confidence: 0.72, hadVoice: true))
+        #expect(!BargeIn.isWeak("liga a luz da sala", confidence: 0.2, hadVoice: false))
+    }
+
     @Test func soPararNaoViraPedido() {
         #expect(BargeIn.isOnlyStop("para"))
         #expect(BargeIn.isOnlyStop("espera aí"))

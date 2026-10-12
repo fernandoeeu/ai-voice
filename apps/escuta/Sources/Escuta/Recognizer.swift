@@ -5,7 +5,11 @@ import Speech
 /// Reconhecimento contínuo em pt-BR que não morre: quando a tarefa da Apple termina ou falha,
 /// abre outra; o áudio que chega no meio fica guardado e vai para a nova, sem buraco.
 final class Recognizer {
-    struct Event { let generation: Int; let text: String; let isFinal: Bool }
+    struct Event {
+        let generation: Int; let text: String; let isFinal: Bool
+        /// Confiança média do reconhecedor neste trecho (0 a 1); nil se ele não informou.
+        let confidence: Double?
+    }
 
     let locale = Locale(identifier: "pt-BR")
     private(set) var format: AVAudioFormat?
@@ -39,7 +43,7 @@ final class Recognizer {
     }
 
     private func makeTranscriber() -> SpeechTranscriber {
-        SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults], attributeOptions: [])
+        SpeechTranscriber(locale: locale, transcriptionOptions: [], reportingOptions: [.volatileResults, .fastResults], attributeOptions: [.transcriptionConfidence])
     }
 
     /// Pede ao reconhecedor os resultados finais de tudo o que já recebeu, sem esperar ele decidir sozinho
@@ -91,7 +95,12 @@ final class Recognizer {
                 do {
                     for try await r in transcriber.results {
                         let text = String(r.text.characters)
-                        await MainActor.run { self?.onEvent?(Event(generation: g, text: text, isFinal: r.isFinal)) }
+                        var sum = 0.0, n = 0
+                        for run in r.text.runs {
+                            if let c = run.transcriptionConfidence { sum += c; n += 1 }
+                        }
+                        let conf: Double? = n > 0 ? sum / Double(n) : nil
+                        await MainActor.run { self?.onEvent?(Event(generation: g, text: text, isFinal: r.isFinal, confidence: conf)) }
                     }
                 } catch {
                     why = "erro: \(error.localizedDescription)"
