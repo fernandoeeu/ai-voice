@@ -51,7 +51,7 @@ const set = (metric: Metric.Metric<number, unknown>, servico: string, value: num
 
 const run = (cmd: ReadonlyArray<string>) =>
   Effect.tryPromise(async () => {
-    const proc = Bun.spawn([...cmd], { stdout: "pipe", stderr: "ignore", stdin: "ignore" })
+    const proc = Bun.spawn([...cmd], { stdout: "pipe", stderr: "ignore", stdin: "ignore", timeout: 5000, killSignal: "SIGKILL" })
     const [stdout, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited])
     return { stdout, code }
   }).pipe(Effect.timeout("5 seconds"), Effect.orElseSucceed(() => ({ stdout: "", code: -1 })))
@@ -152,9 +152,16 @@ const garantirBackend = Effect.gen(function*() {
   yield* Effect.logWarning("coletor OTLP fora do ar; subindo o contêiner jarvis-telemetria")
   if ((yield* run([DOCKER, "info"])).code !== 0 && ORB !== undefined) yield* run([ORB, "start"])
   const up = yield* Effect.tryPromise(async () => {
-    const proc = Bun.spawn([DOCKER, "compose", "-f", COMPOSE, "up", "-d"], { stdout: "inherit", stderr: "inherit" })
+    const proc = Bun.spawn([DOCKER, "compose", "-f", COMPOSE, "up", "-d"], {
+      stdout: "inherit",
+      stderr: "inherit",
+      // Sem isto o Effect.timeout abandonava o processo e, com o daemon travado, empilhava um
+      // `docker compose` novo por minuto (dezenas de processos de ~35 MB cada).
+      timeout: 120_000,
+      killSignal: "SIGKILL"
+    })
     return proc.exited
-  }).pipe(Effect.timeout("3 minutes"), Effect.orElseSucceed(() => -1))
+  }).pipe(Effect.timeout("130 seconds"), Effect.orElseSucceed(() => -1))
   yield* Effect.logInfo(`docker compose up -d terminou com ${up}`)
 }).pipe(Effect.withSpan("sonda.garantirBackend"))
 
