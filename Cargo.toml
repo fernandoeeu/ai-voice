@@ -1,0 +1,29 @@
+[workspace]
+members = ["crates/*"]
+resolver = "3"
+
+[workspace.package]
+version = "0.0.1"
+edition = "2024"
+license = "UNLICENSED"
+publish = false
+
+[workspace.dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+tracing = "0.1"
+
+jarvis-protocolo = { path = "crates/jarvis-protocolo" }
+jarvis-kokoro = { path = "crates/jarvis-kokoro" }
+jarvis-audio = { path = "crates/jarvis-audio" }
+jarvis-lock = { path = "crates/jarvis-lock" }
+jarvis-fala = { path = "crates/jarvis-fala" }
+jarvis-herdr = { path = "crates/jarvis-herdr" }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
