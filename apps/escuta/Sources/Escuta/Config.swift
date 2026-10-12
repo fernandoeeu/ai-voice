@@ -68,6 +68,10 @@ struct Config {
             }
             i += 1
         }
+        // Teste (--audio ou --saida) nunca usa o fala.lock real: senão o barge-in do teste mata a fala de verdade.
+        if c.audioFile != nil || c.outputFile != nil, (env["ESCUTA_LOCK"] ?? "").isEmpty {
+            c.speechLock = NSTemporaryDirectory() + "escuta-teste-\(getpid()).lock"
+        }
         if !["apple", "parakeet"].contains(c.stt) {
             logLine("ESCUTA_STT=\(c.stt) desconhecido; usando apple")
             c.stt = "apple"
