@@ -671,13 +671,15 @@ final class Escuta: ObservableObject {
                 // Ruído contínuo confundindo o medidor: texto parado há 4 s também vale como silêncio.
                 silence = max(sinceVoice, sinceText - 2.7)
             } else {
-                // O medidor não ouviu esta frase (calibrando): só o texto parado conta, com folga de 2,5 s.
-                silence = sinceText - 1.2
+                // O medidor não ouviu esta frase (calibrando): só o texto parado conta, com folga de 0,6 s.
+                silence = sinceText - 0.6
             }
             let activityAt = now.addingTimeInterval(-silence)
             let sinceFinalize = finalizeAt.flatMap { $0 > activityAt && finalizeDone ? now.timeIntervalSince($0) : nil }
             var ep = config.endpoint
-            ep.silence = max(ep.silence, Self.hangover)
+            // A VAD (Silero) já separa respiração de fim de fala: com ela vale o ESCUTA_SILENCIO (0,7 s).
+            // O piso de 1,2 s fica só para o medidor de volume, que se engana mais.
+            if !recognizer.hasVAD { ep.silence = max(ep.silence, Self.hangover) }
             ep.openSilence = max(ep.openSilence, ep.silence)
             var d = Endpoint.decide(text: whole, volatile: !livePartial.isEmpty, silence: silence,
                                     sinceText: sinceText, sinceFinalize: sinceFinalize,
@@ -685,7 +687,9 @@ final class Escuta: ObservableObject {
             // Finais a menos de 1,5 s um do outro são a mesma frase: espera a janela passar antes de fechar.
             // O final que veio do nosso pedido de finalização (com o silêncio confirmado) não reabre a janela;
             // senão todo fim de fala ganhava 1,5 s a mais e frases separadas por 2 s se juntavam.
-            let askedFinal = (meterHeard || recognizer.hasVAD) && finalizeAt.map { lastFinalAt >= $0 } == true
+            // Com VAD, o final vem do fim de fala que ela mesma detectou, e o silêncio já foi confirmado
+            // por ela: a janela não se aplica (custava 1,5 s fixo em todo pedido).
+            let askedFinal = recognizer.hasVAD || (meterHeard && finalizeAt.map { lastFinalAt >= $0 } == true)
             if case .close = d, now.timeIntervalSince(start) < ep.maxUtterance, !askedFinal,
                now.timeIntervalSince(lastFinalAt) < Self.mergeWindow {
                 d = .wait
