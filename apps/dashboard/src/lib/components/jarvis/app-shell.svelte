@@ -3,6 +3,7 @@
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import { modules } from '#lib/jarvis/modules.js';
+	import GearSix from 'phosphor-svelte/lib/GearSix';
 	import ThemeToggle from './theme-toggle.svelte';
 
 	let { children }: { children: Snippet } = $props();
@@ -33,6 +34,19 @@
 		<circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="2.5" />
 		<circle cx="12" cy="12" r="3" fill="currentColor" />
 	</svg>
+{/snippet}
+
+{#snippet settings()}
+	<!-- Configurações: refaz o onboarding (dependências, modelos, módulos e segredos). -->
+	<a
+		href="/onboarding?refazer"
+		aria-label="Configurações"
+		title="Configurações"
+		aria-current={page.url.pathname.startsWith('/onboarding') ? 'page' : undefined}
+		class="grid size-9 place-items-center rounded-[var(--radius-control)] text-ink-soft transition-colors duration-[var(--dur-fast)] hover:bg-hover hover:text-ink aria-[current=page]:text-brand"
+	>
+		<GearSix class="size-[1.125rem]" weight={page.url.pathname.startsWith('/onboarding') ? 'fill' : 'regular'} />
+	</a>
 {/snippet}
 
 <!--
@@ -90,7 +104,10 @@
 					<p class="mt-1.5 text-micro text-transparent select-none">—</p>
 				{/if}
 			</div>
-			<ThemeToggle />
+			<div class="flex items-center">
+				{@render settings()}
+				<ThemeToggle />
+			</div>
 		</div>
 	</aside>
 
@@ -105,6 +122,7 @@
 			{#if now}
 				<span class="tabular text-meta font-medium text-ink-soft">{time}</span>
 			{/if}
+			{@render settings()}
 			<ThemeToggle />
 		</div>
 	</header>

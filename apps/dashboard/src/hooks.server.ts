@@ -1,4 +1,8 @@
 import type { Handle } from '@sveltejs/kit/hooks';
+import { redirect } from '@sveltejs/kit';
+import { isConfigured } from '#lib/server/onboarding/config.js';
+import { isLocalRequest } from '#lib/server/onboarding/loopback.js';
+import { paths as onboardingPaths } from '#lib/server/onboarding/runtime.js';
 import { recordOperation } from '@jarvis/telemetry';
 import { alexaRuntime } from '#lib/server/alexa-runtime.js';
 
@@ -12,6 +16,16 @@ process.once('sveltekit:shutdown', () => alexaRuntime.dispose());
 export const handle: Handle = async ({ event, resolve }) => {
 	const start = performance.now();
 	let status = 500;
+	// Primeira execução neste Mac (sem ~/.config/jarvis/config.json nem instalação anterior): a página inicial
+	// vira o onboarding. Só para quem abre no próprio Mac; da LAN o dashboard segue como está.
+	if (
+		event.url.pathname === '/' &&
+		event.request.method === 'GET' &&
+		isLocalRequest(event.getClientAddress(), event.request.headers) &&
+		!isConfigured(onboardingPaths)
+	) {
+		redirect(307, '/onboarding');
+	}
 	try {
 		const response = await resolve(event);
 		status = response.status;
