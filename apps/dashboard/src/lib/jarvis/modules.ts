@@ -3,6 +3,7 @@ import CalendarBlank from 'phosphor-svelte/lib/CalendarBlank';
 import ChatsCircle from 'phosphor-svelte/lib/ChatsCircle';
 import ListChecks from 'phosphor-svelte/lib/ListChecks';
 import NavigationArrow from 'phosphor-svelte/lib/NavigationArrow';
+import Pulse from 'phosphor-svelte/lib/Pulse';
 import SpeakerHigh from 'phosphor-svelte/lib/SpeakerHigh';
 
 /** A Jarvis module: one entry in the shell's navigation, one route. Add new modules here. */
@@ -18,5 +19,6 @@ export const modules: ReadonlyArray<JarvisModule> = [
 	{ id: 'conversa', label: 'Conversa', href: '/conversa', icon: ChatsCircle },
 	{ id: 'lembretes', label: 'Lembretes', href: '/lembretes', icon: ListChecks },
 	{ id: 'agenda', label: 'Agenda', href: '/agenda', icon: CalendarBlank },
-	{ id: 'ir', label: 'Ir & ligar', href: '/ir', icon: NavigationArrow }
+	{ id: 'ir', label: 'Ir & ligar', href: '/ir', icon: NavigationArrow },
+	{ id: 'telemetria', label: 'Telemetria', href: '/telemetria', icon: Pulse }
 ];
