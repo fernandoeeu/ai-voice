@@ -21,7 +21,8 @@ struct WaitItem: Identifiable, Equatable {
 final class Router {
     static let asksURL = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".local/share/jarvis/asks.jsonl")
     static let yes: Set<String> = ["sim", "pode", "pode sim", "sim pode", "pode rodar", "pode ir", "vai", "manda", "manda ver",
-                                   "ok", "beleza", "aprovado", "aprovo", "claro", "sim claro", "positivo", "pode seguir", "segue"]
+                                   "ok", "beleza", "aprovado", "aprovo", "claro", "sim claro", "positivo", "pode seguir", "segue",
+                                   "sim pode rodar", "pode rodar sim", "pode mandar", "sim manda"]
     static let no: Set<String> = ["nao", "nao pode", "negativo", "cancela", "para", "nem pensar", "nao nao", "nao obrigado"]
     static let filler: Set<String> = ["para", "pro", "pra", "o", "a", "ao", "do", "da", "de"]
     static let prefix = "[voz do Fernando] "
@@ -132,11 +133,29 @@ final class Router {
         }
         guard let t = target else {
             // Lista do herdr indisponível: tenta o painel configurado assim mesmo.
-            let (code, out) = herdr(["agent", "prompt", config.pane, Router.prefix + text])
-            return Result(pane: config.pane, who: "orquestrador", mode: "prompt (sem lista)", ok: code == 0,
+            let (code, out) = steer(config.pane, Router.prefix + text)
+            return Result(pane: config.pane, who: "orquestrador", mode: "steer (sem lista)", ok: code == 0,
                           detail: code == 0 ? "" : out, ms: ms(t0))
         }
         return deliver(to: t, text: text, isYes: isYes, isNo: isNo, t0: t0)
+    }
+
+    /// Estado atual do agente direto do herdr (a lista pode ter alguns segundos).
+    func liveStatus(_ pane: String) -> String? {
+        let (code, s) = herdr(["agent", "get", pane])
+        guard code == 0, let d = s.data(using: .utf8),
+              let o = try? JSONSerialization.jsonObject(with: d) as? [String: Any],
+              let r = o["result"] as? [String: Any], let a = r["agent"] as? [String: Any] else { return nil }
+        return a["agent_status"] as? String
+    }
+
+    /// Digita o texto e confirma com Ctrl+Enter: com turno em andamento o Claude Code recebe como steer
+    /// (entra no meio do turno, sem fila); ocioso, envia normalmente.
+    /// `agent prompt` não serve aqui porque sempre confirma com Enter, que enfileira durante o turno.
+    func steer(_ pane: String, _ message: String) -> (Int32, String) {
+        let (c1, o1) = herdr(["pane", "send-text", pane, message])
+        guard c1 == 0 else { return (c1, o1) }
+        return herdr(["agent", "send-keys", pane, "ctrl+enter"])
     }
 
     func deliver(to t: HerdrAgent, text: String, isYes: Bool, isNo: Bool, t0: Date = Date()) -> Result {
@@ -144,13 +163,18 @@ final class Router {
         var mode: String
         var code: Int32
         var out: String
-        if t.status == "blocked" && (isYes || isNo) {
+        let status = liveStatus(t.pane) ?? t.status
+        if status == "blocked" && (isYes || isNo) {
+            // Diálogo de permissão aberto e a frase é só "sim"/"não": aperta a tecla, sem texto.
+            let key = isYes ? "Enter" : "esc"
             mode = isYes ? "aprovou (Enter)" : "recusou (Esc)"
-            (code, out) = herdr(["agent", "send-keys", t.pane, isYes ? "Enter" : "esc"])
+            (code, out) = herdr(["agent", "send-keys", t.pane, key])
+            emit(["type": "aprovacao", "acao": isYes ? "enter" : "esc", "pane": t.pane, "who": t.short, "text": text,
+                  "ok": code == 0, "ms": ms(t0)])
         } else {
-            if t.status == "blocked" { herdr(["agent", "send-keys", t.pane, "esc"]); Thread.sleep(forTimeInterval: 0.3) }
-            mode = "prompt"
-            (code, out) = herdr(["agent", "prompt", t.pane, Router.prefix + text])
+            if status == "blocked" { herdr(["agent", "send-keys", t.pane, "esc"]); Thread.sleep(forTimeInterval: 0.3) }
+            mode = "steer"
+            (code, out) = steer(t.pane, Router.prefix + text)
         }
         answered[t.pane] = Date().timeIntervalSince1970
         return Result(pane: t.pane, who: t.short, mode: mode, ok: code == 0, detail: code == 0 ? "" : out, ms: ms(t0))

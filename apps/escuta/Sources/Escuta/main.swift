@@ -33,6 +33,7 @@ final class StatusBar: NSObject {
         item.button?.toolTip = "Escuta do Jarvis"
         model.objectWillChange
             .receive(on: RunLoop.main)
+            .throttle(for: .milliseconds(200), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in DispatchQueue.main.async { self?.refreshIcon() } }
             .store(in: &bag)
         refreshIcon()
