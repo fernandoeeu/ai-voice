@@ -23,6 +23,7 @@
       "padrao": "escuta-fora-instalada",
       "argv0": "^(\\./Escuta|\\S*/(scratchpad|\\.build|worktrees?)/\\S*Escuta)$",
       "excluir": "/\\.local/share/jarvis/bin/Escuta\\.app/",
+      "exigeVariavel": "ESCUTA_LOCK",
       "idadeMinS": 600,
       "idadeComPaiVivoS": 3600
     },

@@ -95,6 +95,35 @@ describe("lixo conhecido", () => {
   })
 })
 
+describe("Escuta sem ESCUTA_LOCK próprio", () => {
+  const ps = `  600  900  600 S  00:01:00  0.5  80000  501 ./Escuta --stt parakeet --audio /tmp/scratchpad/a.wav
+  601  900  601 S  00:01:00  0.5  80000  501 ./Escuta --stt parakeet --audio /tmp/scratchpad/b.wav
+  602  900  602 S  00:01:00  0.5  80000  501 ./Escuta --stt parakeet --audio /tmp/scratchpad/c.wav
+  603  900  603 S  00:01:00  0.5  80000  501 ${H}/.local/share/jarvis/bin/Escuta.app/Contents/MacOS/Escuta
+   60    1   60 S  00:01:00  0.5  80000  501 ./Escuta
+  900    1  900 Ss 05:00:00  0.0   2000  501 /bin/zsh
+`
+  const envs: Record<number, string | undefined> = {
+    600: "./Escuta --stt FOO=1 PATH=/bin",
+    601: "./Escuta --stt ESCUTA_LOCK=/tmp/cal2/lock PATH=/bin",
+    602: undefined,
+    603: "Escuta PATH=/bin",
+    60: "./Escuta PATH=/bin"
+  }
+  const r = avaliar(parsePs(ps), { config, uid: UID, meuPid: 9999, cpuAnterior: {}, ambiente: (pid) => envs[pid] })
+  it("mata na hora, com 1 min e pai vivo, quando falta o lock", () => {
+    expect(r.matar.map((a) => a.proc.pid)).toEqual([600])
+    expect(r.matar[0]?.motivo).toMatch(/ESCUTA_LOCK/)
+  })
+  it("poupa quem tem lock próprio, ambiente ilegível, a instalada e PID < 100", () => {
+    const p = r.poupados.map((a) => a.proc.pid)
+    expect(p).toContain(601)
+    expect(p).toContain(602)
+    expect(p).toContain(60)
+    expect(r.matar.map((a) => a.proc.pid)).not.toContain(603)
+  })
+})
+
 describe("nunca mate", () => {
   it("claude, codex e herdr, mesmo que um padrão de lixo os casasse", () => {
     const frouxa = compilarConfig({ lixo: [{ padrao: "tudo", comando: ".*", idadeMinS: 0 }] })

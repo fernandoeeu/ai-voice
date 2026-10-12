@@ -29,6 +29,8 @@ export interface RegraLixo {
   readonly idadeMinS: number
   /** Com o pai vivo, só mata a partir desta idade (s). Ausente = nunca com pai vivo. */
   readonly idadeComPaiVivoS?: number
+  /** Variável de ambiente que o processo precisa ter; sem ela morre na hora, sem olhar idade nem pai. */
+  readonly exigeVariavel?: string
 }
 
 export interface Config {
@@ -67,7 +69,7 @@ export const compilarConfig = (bruto: any): Config => {
     if (!a && !k) throw new Error(`allowlist[${i}] sem argv0 nem comando`)
     return { nome: c.nome ?? `allow-${i}`, ...(a ? { argv0: a } : {}), ...(k ? { comando: k } : {}) }
   })
-  const lixo = ((bruto.lixo ?? []) as Array<BrutoCasador & { idadeMinS?: number; idadeComPaiVivoS?: number }>).map(
+  const lixo = ((bruto.lixo ?? []) as Array<BrutoCasador & { idadeMinS?: number; idadeComPaiVivoS?: number; exigeVariavel?: string }>).map(
     (r, i): RegraLixo => {
       const a = re(r.argv0, `lixo[${i}].argv0`)
       const k = re(r.comando, `lixo[${i}].comando`)
@@ -79,6 +81,7 @@ export const compilarConfig = (bruto: any): Config => {
         ...(a ? { argv0: a } : {}),
         ...(k ? { comando: k } : {}),
         ...(x ? { excluir: x } : {}),
+        ...(r.exigeVariavel ? { exigeVariavel: r.exigeVariavel } : {}),
         idadeMinS: r.idadeMinS ?? 600,
         ...(r.idadeComPaiVivoS === undefined ? {} : { idadeComPaiVivoS: r.idadeComPaiVivoS })
       }

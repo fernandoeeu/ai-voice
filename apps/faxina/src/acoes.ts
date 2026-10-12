@@ -1,4 +1,4 @@
-import { execFile } from "node:child_process"
+import { execFile, execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import { join } from "node:path"
@@ -59,5 +59,16 @@ export const enviarEvento = async (texto: string): Promise<string> => {
     return `http ${r.status}`
   } catch (e) {
     return `erro: ${e instanceof Error ? e.message : String(e)}`
+  }
+}
+
+/** Ambiente de um processo do mesmo usuário (`ps eww`); undefined se ilegível (binário protegido do sistema ou sumiu). */
+export const lerAmbiente = (pid: number): string | undefined => {
+  try {
+    const saida = execFileSync("/bin/ps", ["eww", "-p", String(pid)], { encoding: "utf8", timeout: 3000 })
+    const linha = saida.split("\n")[1]
+    return linha && linha.includes("=") ? linha : undefined
+  } catch {
+    return undefined
   }
 }

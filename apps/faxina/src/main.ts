@@ -10,7 +10,7 @@
 import { BunRuntime } from "@effect/platform-bun"
 import * as Telemetry from "@jarvis/telemetry"
 import { Cause, Effect, Layer, Logger } from "effect"
-import { aindaVivo, enviarEvento, lerPs, sinalizar } from "./acoes.ts"
+import { aindaVivo, enviarEvento, lerAmbiente, lerPs, sinalizar } from "./acoes.ts"
 import { lerConfig, PASTA } from "./config.ts"
 import { estadoVazio, filtrarNovos, gravarEstado, lerEstado, registrarAcao } from "./estado.ts"
 import { publicar } from "./metricas.ts"
@@ -24,7 +24,7 @@ const passada = Effect.gen(function*() {
   const procs = yield* Effect.tryPromise(lerPs)
   const estado = seco ? estadoVazio() : lerEstado(ESTADO)
   const agora = Date.now()
-  const r = avaliar(procs, { config, uid: process.getuid?.() ?? 0, meuPid: process.pid, cpuAnterior: seco ? {} : estado.cpu })
+  const r = avaliar(procs, { config, uid: process.getuid?.() ?? 0, meuPid: process.pid, cpuAnterior: seco ? {} : estado.cpu, ambiente: lerAmbiente })
 
   if (seco) {
     // Em modo seco não há passadas anteriores: só o que não depende delas aparece.

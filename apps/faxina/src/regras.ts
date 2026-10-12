@@ -11,6 +11,8 @@ export interface Contexto {
   /** pid desta passada (e, pela árvore, seus ancestrais) nunca é alvo. */
   readonly meuPid: number
   readonly cpuAnterior: CpuVisto
+  /** Ambiente do processo (`ps eww`); undefined = ilegível. Só é consultado para regras com `exigeVariavel`. */
+  readonly ambiente?: (pid: number) => string | undefined
 }
 
 export type TipoAlerta = "zumbi" | "cpu" | "memoria"
@@ -132,6 +134,13 @@ export const avaliar = (procs: ReadonlyArray<Proc>, ctx: Contexto): Resultado =>
     if (prot) {
       poupados.push(alvo(`protegido: ${prot}`))
       continue
+    }
+    if (regra.exigeVariavel && ctx.ambiente) {
+      const env = ctx.ambiente(p.pid)
+      if (env !== undefined && !new RegExp(`(^|\\s)${regra.exigeVariavel}=\\S`).test(env)) {
+        matar.push(alvo(`sem ${regra.exigeVariavel} próprio (usa o lock real da fala)`))
+        continue
+      }
     }
     if (!paiVivo(p, porPid)) {
       if (p.idadeS >= regra.idadeMinS) matar.push(alvo(`órfão há ${fmtIdade(p.idadeS)}`))
