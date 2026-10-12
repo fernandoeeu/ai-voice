@@ -132,10 +132,10 @@ final class MicCapture: NSObject, AVCaptureAudioDataOutputSampleBufferDelegate {
 
 /// Ganho automático lento: leva a fala para perto de -20 dBFS antes do medidor e do reconhecedor.
 /// Só aprende com blocos de fala (bem acima do ruído), então o silêncio não é amplificado até virar ruído alto.
-/// Só aumenta (0 a +24 dB); um limitador suave impede clipping.
+/// Só aumenta (0 a +36 dB; o HyperX fala a -60..-40 dBFS); um limitador suave impede clipping.
 struct AGC {
     var target: Float = -20
-    var maxGain: Float = 24
+    var maxGain: Float = 36
     private(set) var gainDB: Float = 0
     private(set) var floorDB: Float = 0
     private(set) var speechDB: Float = -120

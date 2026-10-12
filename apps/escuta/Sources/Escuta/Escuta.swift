@@ -96,7 +96,8 @@ final class Escuta: ObservableObject {
     private var lastPartialAt: Date?
     private var buffersIn = 0, framesOut = 0, convErrors = 0, partials = 0, finals = 0
     private var peakDB: Float = -120
-    private var noiseFloor: Float = -60
+    private var voiceMeter = VoiceMeter()
+    private var minutePeakDB: Float = -120
     private var formats = ""
     private let startedAt = Date()
     private var audioStartedAt: Date?
@@ -395,15 +396,16 @@ final class Escuta: ObservableObject {
         for i in 0..<n { sum += ch[i] * ch[i] }
         let rms = sqrt(sum / Float(max(n, 1)))
         let db = 20 * log10(max(rms, 1e-6))
-        let level = max(0, min(1, (db + 60) / 50))
         let seconds = Double(n) / buffer.format.sampleRate
         DispatchQueue.main.async {
             self.peakDB = max(self.peakDB, db)
-            // Piso de ruído: desce rápido, sobe devagar. Voz = bem acima do piso.
-            self.noiseFloor = db < self.noiseFloor ? db : min(db, self.noiseFloor + 0.05)
-            // Limiar relativo ao piso calibrado, sem o -48 dB fixo: o HyperX fala a -60..-37 dB e entre as
-            // palavras manda silêncio digital; com -48 o medidor ficava surdo e a frase fechava no meio da palavra.
-            let isVoice = db > max(self.noiseFloor + 15, -90)
+            self.minutePeakDB = max(self.minutePeakDB, db)
+            // Limiar calibrado para o microfone atual (piso de ruído e nível de voz dele), sem o -48 dB fixo:
+            // o HyperX fala a -60..-37 dB e entre as palavras manda silêncio digital; com -48 o medidor ficava
+            // surdo e a frase fechava no meio da palavra.
+            let isVoice = self.voiceMeter.feed(db: db, seconds: seconds)
+            // Onda do painel relativa ao piso do aparelho: headset baixo também mexe a onda.
+            let level = max(0, min(1, (db - max(self.voiceMeter.floor, -90)) / 40))
             self.voiceRun = isVoice ? self.voiceRun + seconds : 0
             // Já falando, cada bloco com voz renova; para começar, ~60 ms seguidos.
             let speaking = Date().timeIntervalSince(self.lastVoiceAt) < 0.3
@@ -457,6 +459,7 @@ final class Escuta: ObservableObject {
             return
         }
         micName = best.localizedName
+        voiceMeter.reset()
         formats = "mic \(best.localizedName) → 16000 Hz"
         if phase == .error { phase = .listening; errorText = nil }
         logLine("captura: mic \(best.localizedName) (troca: \(why))")
@@ -806,7 +809,8 @@ final class Escuta: ObservableObject {
         diag = "áudio \(buffersIn / 2) buf/s · pico \(Int(peakDB)) dB · parciais \(partials) · finais \(finals) · rec #\(recognizer.generation)"
         if Date().timeIntervalSince(lastDiagLog) >= 60 {
             lastDiagLog = Date()
-            logLine("\(diag) · conv_err \(convErrors) · frames \(framesOut) · \(formats)")
+            logLine("\(diag) · pico no minuto \(Int(minutePeakDB)) dB · piso \(Int(voiceMeter.floor)) dB · voz \(Int(voiceMeter.voice)) dB · limiar \(Int(voiceMeter.threshold)) dB · conv_err \(convErrors) · frames \(framesOut) · \(formats)")
+            minutePeakDB = -120
         }
         if config.audioFile == nil, phase != .paused, phase != .error,
            let s = audioStartedAt, Date().timeIntervalSince(s) > 8 {
