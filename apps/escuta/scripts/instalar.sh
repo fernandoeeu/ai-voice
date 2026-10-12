@@ -68,10 +68,7 @@ cat > "$PLIST" <<EOF
     <key>PATH</key><string>$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key><false/>
-  </dict>
+  <key>KeepAlive</key><true/>
   <key>ThrottleInterval</key><integer>5</integer>
   <key>ExitTimeOut</key><integer>30</integer>
   <key>ProcessType</key><string>Interactive</string>
