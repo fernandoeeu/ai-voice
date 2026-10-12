@@ -9,6 +9,22 @@
         "typescript": "^6.0.3",
       },
     },
+    "apps/coletor": {
+      "name": "@jarvis/coletor",
+      "version": "0.1.0",
+      "bin": {
+        "jarvis-coletor": "./src/main.ts",
+      },
+      "dependencies": {
+        "@effect/platform-bun": "4.0.3",
+        "effect": "4.0.3",
+      },
+      "devDependencies": {
+        "@effect/vitest": "4.0.3",
+        "@types/bun": "^1.3.14",
+        "vitest": "5.0.3",
+      },
+    },
     "apps/dashboard": {
       "name": "@jarvis/dashboard",
       "version": "0.0.1",
@@ -211,11 +227,13 @@
 
     "@jarvis/apple": ["@jarvis/apple@workspace:packages/apple"],
 
+    "@jarvis/coletor": ["@jarvis/coletor@workspace:apps/coletor"],
+
     "@jarvis/dashboard": ["@jarvis/dashboard@workspace:apps/dashboard"],
 
-    "@jarvis/grokbot": ["@jarvis/grokbot@workspace:packages/grokbot"],
-
     "@jarvis/faxina": ["@jarvis/faxina@workspace:apps/faxina"],
+
+    "@jarvis/grokbot": ["@jarvis/grokbot@workspace:packages/grokbot"],
 
     "@jarvis/maestro": ["@jarvis/maestro@workspace:apps/maestro"],
 
