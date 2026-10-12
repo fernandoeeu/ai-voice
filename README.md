@@ -55,20 +55,28 @@ Você fala "Jarvis, roda os testes e me avisa", levanta da cadeira e ouve a resp
 
 ## Requisitos
 
-- **macOS**, de preferência em Apple Silicon (a voz Kokoro só roda nele; sem ela, o Jarvis fala com o `say`). A Escuta precisa do **macOS 26**.
-- **[Bun](https://bun.sh) 1.3** ou mais novo. A versão exata está em `packageManager` no `package.json`.
-- **Xcode Command Line Tools** (`xcode-select --install`): compilam a Escuta, o Jarvis.app e o helper do Calendário.
-- **[uv](https://docs.astral.sh/uv/)** (`brew install uv`) ou Python 3.12, para o servidor de voz.
-- **Docker**, de preferência [OrbStack](https://orbstack.dev) (`brew install orbstack`), ou Docker Desktop, para a telemetria.
-- **herdr**, para a Escuta e o maestro entregarem pedidos aos agentes.
-- Opcional: uma conta Amazon com uma Echo, se quiser que o Jarvis fale na sala.
+Confira antes de começar. O `scripts/setup.sh` também confere e avisa o que falta.
+
+| Peça | Versão | Para quê | Como instalar |
+| --- | --- | --- | --- |
+| macOS | 26 ou mais novo para a Escuta (SpeechAnalyzer); o resto roda em versões anteriores | Tudo | |
+| Apple Silicon (M1 ou mais novo) | | A voz Kokoro (MLX) só roda nele; sem ele a fala cai no `say` | |
+| [Bun](https://bun.sh) | 1.3 ou mais novo (o repositório fixa `bun@1.3.14` em `packageManager`) | Workspace, dashboard, MCP, maestro, coletor | `brew install oven-sh/bun/bun` |
+| Xcode Command Line Tools (Swift) | as do macOS 26 | Compilam a Escuta, o Jarvis.app e o helper do Calendário | `xcode-select --install` |
+| [uv](https://docs.astral.sh/uv/) ou Python 3.12 | Python 3.12 | Servidor de voz Kokoro (venv e modelo em `~/.local/share/jarvis/tts`) | `brew install uv` |
+| [Docker](https://orbstack.dev) (OrbStack ou Docker Desktop) | qualquer recente | Só a telemetria (Grafana LGTM) | `brew install orbstack` |
+| [herdr](https://herdr.dev) | o mais recente | A Escuta e o maestro entregam os pedidos aos agentes dentro dele; deve estar no `PATH` ou em `~/.local/bin/herdr` | veja o site do herdr |
+| [Claude Code](https://claude.com/claude-code) | o mais recente (`claude` no `PATH`) | Os agentes, o registro do MCP e os hooks de fala | veja a documentação do Claude Code |
+| [Tailscale](https://tailscale.com) | opcional | Acessar o dashboard de outros aparelhos e expor o callback do Grok Bot (`tailscale funnel`) | `brew install --cask tailscale` |
+| Conta Amazon com uma Echo | opcional | Falar na sala | |
+| Grok Bot | opcional | Pesquisa em redes sociais, resposta pelo callback | |
 
 ## Setup
 
 ### 1. Clonar e rodar o setup
 
 ```sh
-git clone https://github.com/<você>/<seu-fork>.git ~/jarvis
+git clone https://github.com/fernandoeeu/jarvis.git ~/jarvis   # repositório privado: aceite o convite de colaborador antes
 cd ~/jarvis
 ./scripts/setup.sh --dry-run   # mostra o que faria, sem mudar nada
 ./scripts/setup.sh             # ou: bun run setup
@@ -216,6 +224,92 @@ Com o LaunchAgent `dev.jarvis.telemetria`, a sonda sobe o contêiner sozinha qua
 ```sh
 jarvis-fala "Olá, eu sou o Jarvis."
 ```
+
+## Subir e parar tudo
+
+Depois do setup, tudo sobe sozinho a cada login (LaunchAgents). Para usar, basta abrir o **Jarvis.app** (`~/Applications/Jarvis.app`, ou **⌃⌥J** de qualquer app): ele é só a janela do dashboard, os serviços já estão rodando por baixo.
+
+```sh
+# ver o que está carregado
+launchctl list | grep dev.jarvis
+
+# reiniciar um serviço
+launchctl kickstart -k gui/$(id -u)/dev.jarvis.dashboard
+
+# parar tudo (volta no próximo login, ou com o setup/instaladores de novo)
+for l in dev.jarvis.escuta dev.jarvis.maestro dev.jarvis.eventos dev.jarvis.callback dev.jarvis.dashboard dev.jarvis.coletor dev.jarvis.telemetria dev.jarvis.tts; do
+  launchctl bootout gui/$(id -u)/$l 2>/dev/null
+done
+docker stop jarvis-telemetria 2>/dev/null
+
+# subir tudo de novo
+./scripts/setup.sh --sim
+```
+
+Desinstalar: veja [docs/setup.md](docs/setup.md#uninstall).
+
+## Hooks do Claude Code
+
+Os hooks são opcionais e você os cola à mão no `~/.claude/settings.json` (nada edita esse arquivo sozinho):
+
+- `jarvis-avisa` (Notification e Stop) e `jarvis-fala-resposta` (Stop): o Jarvis fala quando uma sessão pede permissão, termina com uma pergunta ou responde a um pedido falado. O trecho pronto está em [docs/setup.md](docs/setup.md). Os dois usam `claude -p --model haiku` para encurtar o texto.
+- Maestro: `apps/maestro/install.sh --hooks` imprime os hooks `SessionStart` e `PreCompact` já com os caminhos do seu clone.
+
+## Configuração por pessoa
+
+### Variáveis de ambiente (só os nomes; sem segredos)
+
+O `scripts/setup.sh` grava as principais em `~/.config/jarvis/jarvis.env` (modo 600). Variável de ambiente com o mesmo nome vale mais que o arquivo.
+
+| Variável | Para quê |
+| --- | --- |
+| `AI_VOICE_ENABLE_SPEECH` | A fala só sai com `1` (o setup já registra o MCP assim) |
+| `AI_VOICE_LOCALE` | Idioma da fala (padrão `pt-BR`) |
+| `AI_VOICE_OUTPUT` | `mac` ou `echo`: onde falar por padrão |
+| `AI_VOICE_TTS_VOICE` | Voz do Kokoro (padrão `pf_dora`) |
+| `AI_VOICE_AMAZON_PAGE` | Marketplace da sua conta Amazon (`amazon.com.br`, `amazon.com`...) |
+| `AI_VOICE_DEFAULT_DEVICE` | Serial da sua Echo padrão (vazio se não usa Echo) |
+| `AI_VOICE_STATE_DIR` | Opcional: onde fica a sessão da Amazon (padrão `~/.local/share/ai-voice`) |
+| `JARVIS_CALLBACK_PORT` | Porta do callback do Grok Bot (padrão 7348) |
+| `ESCUTA_ORQUESTRADOR` | Nome do agente do herdr que recebe os pedidos falados |
+| `ESCUTA_PANE` | Pane do herdr de destino, se quiser fixar um |
+| `ESCUTA_MIC` | Partes do nome dos microfones preferidos, em ordem |
+| `ESCUTA_STT` | `parakeet` liga o Parakeet em vez do reconhecimento da Apple |
+| `JARVIS_DASHBOARD_URL` | URL que o Jarvis.app abre |
+| `JARVIS_SIGNING_IDENTITY` | Identidade de assinatura dos apps (padrão "Jarvis Local Signing") |
+| `JARVIS_MAESTRO_NOME`, `JARVIS_MAESTRO_DIR`, `JARVIS_MAESTRO_WORKSPACE` | Nome, pasta de memória e workspace do maestro |
+| `JARVIS_CONFIG`, `JARVIS_TTS_HOME` | Caminhos do arquivo de config e da voz |
+
+O Grok Bot guarda as chaves no Keychain do macOS; a sessão da Amazon fica em `~/.local/share/ai-voice/`. Nada disso vai para o git.
+
+### O que é específico do Mac do Fernando e você precisa trocar
+
+Os scripts de instalação usam `$HOME` e o caminho do seu clone, então não há caminho absoluto `/Users/fernandodudata` no código (só em logs e testes). O que sobra de pessoal:
+
+1. **Echo e conta Amazon**: o serial da Echo do Fernando não está no repositório. Rode `bun apps/mcp/src/main.ts login` com a sua conta e `bun apps/mcp/src/main.ts devices` para achar a sua; ponha o serial em `AI_VOICE_DEFAULT_DEVICE`. Sem Echo, deixe `AI_VOICE_OUTPUT=mac`.
+2. **Grok Bot**: precisa de conta e conector seus. Sem ele, instale sem `--com-grok` e ignore a tool `grokbot_send`. Com ele, use o seu domínio do Tailscale Funnel no conector.
+3. **Nome "Fernando"**: o prefixo `[voz do Fernando] ` que a Escuta põe nos pedidos está fixo em `apps/escuta/Sources/Escuta/Router.swift` (linha 28), e as tools `notify_fernando` e `speak_fernando` do callback e os textos do maestro (`apps/maestro/agente/*.in`, `agentes.example.json`) também falam do Fernando. Funciona assim mesmo; troque o nome se quiser. Se mudar o prefixo, ajuste `JARVIS_VOZ_MARCADOR` do hook `jarvis-fala-resposta`.
+4. **Microfone**: o padrão da Escuta é `HyperX,iPhone,MacBook` (microfones do Fernando); defina `ESCUTA_MIC` com o nome do seu.
+5. **Agentes do herdr**: o nome do agente que recebe os pedidos (`ESCUTA_ORQUESTRADOR`) e as rotinas (`apps/maestro/agentes.example.json`, `rotinas.example.json`) são pontos de partida; copie e adapte aos seus projetos.
+6. **Assinatura**: crie o certificado "Jarvis Local Signing" (seção abaixo) ou aceite que o macOS peça as permissões de novo a cada build.
+7. **Tailscale**: o dashboard aceita hosts da tailnet (`ts.net` e `100.64/10`); sem Tailscale ele atende só `127.0.0.1` e a LAN.
+
+## Solução de problemas
+
+| Sintoma | O que fazer |
+| --- | --- |
+| `scripts/setup.sh` para em pré-requisito | Instale o que ele listou e rode de novo; `--dry-run` mostra tudo sem mudar nada |
+| Sem voz do Kokoro, o Jarvis fala com o `say` | Mac sem Apple Silicon, ou falta `uv`/Python 3.12; veja `~/.local/share/jarvis/tts/logs/` e `launchctl kickstart -k gui/$(id -u)/dev.jarvis.tts` |
+| A Escuta não foi instalada | Falta o herdr no `PATH` ou o macOS é anterior ao 26; instale e rode o setup (ou `--com-escuta`) |
+| A Escuta não ouve | Libere Microfone e Reconhecimento de Fala em Ajustes do Sistema > Privacidade e Segurança; reinicie com `launchctl kickstart -k gui/$(id -u)/dev.jarvis.escuta` |
+| O macOS pede as permissões a cada compilação | Crie o certificado "Jarvis Local Signing" |
+| O dashboard não abre em `127.0.0.1:7350` | `launchctl kickstart -k gui/$(id -u)/dev.jarvis.dashboard` e confira se a porta está livre |
+| Erro 5 no `launchctl bootstrap` | O agente anterior ainda não terminou de sair; rode o instalador de novo |
+| A aba Telemetria está vazia | Docker precisa estar rodando; `services/telemetria/install.sh` e `apps/coletor/scripts/instalar.sh` |
+| A Echo não fala | `bun apps/mcp/src/main.ts devices` deve listá-la; se não, refaça o `login` |
+| O MCP `ai-voice` não aparece no Claude Code | `claude mcp list`; registre à mão com o comando da seção MCP |
+
+Mais detalhes em [docs/configuration.md](docs/configuration.md).
 
 ## Telemetria
 
