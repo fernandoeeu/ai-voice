@@ -7,6 +7,7 @@ import {
   Effect,
   FileSystem,
   Layer,
+  Metric,
   Option,
   Order,
   Path,
@@ -28,6 +29,12 @@ export const RETENTION = Duration.days(7)
 export const MAX_ENTRIES = 500
 
 const OUTBOX_DIRECTORY = "grokbot-outbox"
+
+/** From the task being sent to its result arriving, for each first delivery, by `status`. */
+export const deliveryLatency = Metric.histogram("jarvis_grokbot_entrega_ms", {
+  description: "Tempo entre enviar a tarefa ao Grok Bot e receber o resultado, em milissegundos.",
+  boundaries: [1000, 5000, 15000, 30000, 60000, 120000, 300000, 600000, 1800000, 3600000, 21600000, 86400000]
+})
 
 const utf8 = new TextEncoder()
 
@@ -178,6 +185,10 @@ const make = Effect.fnUntraced(function*(stateDir: string) {
       }
       yield* write({ ...entry.value, status: delivery.status, resultMd: delivery.resultMd, deliveredAt: now }).pipe(
         Effect.mapError(storageError)
+      )
+      yield* Metric.update(
+        Metric.withAttributes(deliveryLatency, { status: delivery.status }),
+        Math.max(0, now - entry.value.sentAt)
       )
       return "delivered" as const
     }).pipe(Semaphore.withPermits(deliveries, 1))

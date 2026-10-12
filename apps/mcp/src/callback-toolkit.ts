@@ -1,3 +1,4 @@
+import { observeTools } from "@jarvis/telemetry"
 import { AlexaConfig, speechDisabled } from "@jarvis/alexa"
 import { contentHash, DEDUP_WINDOW_MS, isOffPersona, sanitize } from "@jarvis/announce"
 import {
@@ -200,7 +201,7 @@ export const CallbackToolkitHandlers = CallbackToolkit.toLayer(Effect.gen(functi
   const mac = yield* MacVoice
   const { speechEnabled, stateDir } = yield* AlexaConfig
   const quota = yield* makeQuota(stateDir)
-  return CallbackToolkit.of({
+  return CallbackToolkit.of(observeTools("callback", {
     grokbot_deliver: (input) =>
       Effect.map(outbox.deliver(input), (outcome) => ({ requestId: input.requestId, outcome })),
     // A single attempt: a lost answer does not mean nothing was spoken.
@@ -219,7 +220,7 @@ export const CallbackToolkitHandlers = CallbackToolkit.toLayer(Effect.gen(functi
       const played = yield* mac.speak(spoken)
       return { status: "accepted" as const, playbackConfirmed: played.playbackConfirmed }
     })
-  })
+  }))
 }))
 
 /**

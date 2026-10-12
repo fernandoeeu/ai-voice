@@ -1,3 +1,4 @@
+import { observeTools } from "@jarvis/telemetry"
 import {
   AutomationError,
   Calendar,
@@ -156,7 +157,7 @@ export const AppleToolkitHandlers = AppleToolkit.toLayer(Effect.gen(function*() 
   const calendar = yield* Calendar
   const maps = yield* Maps
   const phone = yield* Phone
-  return AppleToolkit.of({
+  return AppleToolkit.of(observeTools("mcp", {
     reminders_lists: () => reminders.lists,
     reminders_list: (input) => reminders.list(input),
     reminders_add: (input) => reminders.add(input),
@@ -166,7 +167,7 @@ export const AppleToolkitHandlers = AppleToolkit.toLayer(Effect.gen(function*() 
     maps_search: (input) => maps.search(input),
     maps_directions: (input) => maps.directions(input),
     phone_call: (input) => phone.call(input)
-  })
+  }))
 }))
 
 /**

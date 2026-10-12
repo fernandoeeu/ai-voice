@@ -1,3 +1,4 @@
+import { observeTools } from "@jarvis/telemetry"
 import { GrokBot, GrokBotDispatch, GrokBotError, MAX_CONTEXT_LENGTH, MAX_TASK_LENGTH } from "@jarvis/grokbot"
 import { Effect, Layer, Schema } from "effect"
 import { McpServer, Tool, Toolkit } from "effect/ai"
@@ -31,9 +32,9 @@ export const GrokBotToolkit = Toolkit.make(GrokBotSend)
  */
 export const GrokBotToolkitHandlers = GrokBotToolkit.toLayer(Effect.gen(function*() {
   const grokbot = yield* GrokBot
-  return GrokBotToolkit.of({
+  return GrokBotToolkit.of(observeTools("mcp", {
     grokbot_send: (input) => grokbot.send(input)
-  })
+  }))
 }))
 
 /**

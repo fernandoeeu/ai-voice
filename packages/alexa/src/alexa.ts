@@ -12,6 +12,7 @@ import {
   Semaphore,
   SynchronizedRef
 } from "effect"
+import { observe } from "@jarvis/telemetry"
 import { HttpClient } from "effect/http"
 import { ChildProcessSpawner } from "effect/process"
 import { AlexaConfig } from "./alexa-config.ts"
@@ -183,7 +184,10 @@ const make = Effect.fnUntraced(function*(options: AlexaOptions) {
     }
   )
 
-  return { devices, speak }
+  return {
+    devices: devices.pipe(observe("alexa.dispositivos")),
+    speak: (input: Parameters<typeof speak>[0]) => speak(input).pipe(observe("alexa.fala"))
+  }
 })
 
 export class Alexa extends Context.Service<Alexa, {

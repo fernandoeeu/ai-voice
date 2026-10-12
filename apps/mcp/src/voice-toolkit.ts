@@ -1,3 +1,4 @@
+import { observeTools } from "@jarvis/telemetry"
 import { Alexa, AlexaError, Echo, MAX_TEXT_LENGTH } from "@jarvis/alexa"
 import { Effect, Schema, SchemaTransformation } from "effect"
 import { Tool, Toolkit } from "effect/ai"
@@ -64,8 +65,8 @@ export const voiceHandlers = (toolkit: VoiceToolkit) =>
   toolkit.toLayer(Effect.gen(function*() {
     const alexa = yield* Alexa
     const speaker = yield* Speaker
-    return toolkit.of({
+    return toolkit.of(observeTools("mcp", {
       list_devices: () => alexa.devices,
       speak: (input) => speaker.speak(input)
-    })
+    }))
   }))

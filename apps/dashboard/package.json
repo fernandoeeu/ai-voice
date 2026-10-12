@@ -44,6 +44,7 @@
 		"@effect/platform-node": "4.0.3",
 		"@jarvis/alexa": "workspace:*",
 		"@jarvis/apple": "workspace:*",
+		"@jarvis/telemetry": "workspace:*",
 		"@jarvis/voice": "workspace:*",
 		"effect": "4.0.3"
 	}

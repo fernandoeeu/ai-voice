@@ -1,3 +1,4 @@
+import { observe } from "@jarvis/telemetry"
 import { Context, Duration, Effect, Layer } from "effect"
 import { type ChildProcess, ChildProcessSpawner } from "effect/process"
 import { AutomationError } from "./apple-error.ts"
@@ -108,7 +109,10 @@ export class Osascript extends Context.Service<Osascript, {
         yield* exec(command(OPEN, [parsed.href]), "open", DEFAULT_TIMEOUT)
       })
 
-      return Osascript.of({ run, open })
+      return Osascript.of({
+        run: (script, args, runOptions) => run(script, args, runOptions).pipe(observe("apple.osascript")),
+        open: (url) => open(url).pipe(observe("apple.abrir"))
+      })
     })
   )
 }

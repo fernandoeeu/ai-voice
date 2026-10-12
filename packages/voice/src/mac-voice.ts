@@ -1,4 +1,4 @@
-import { Context, Duration, Effect, FileSystem, Layer, Option, Path, Schema, SchemaTransformation } from "effect"
+import { Clock, Context, Duration, Effect, FileSystem, Layer, Metric, Option, Path, Schema, SchemaTransformation } from "effect"
 import { FetchHttpClient, HttpClient, HttpClientRequest } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { MacVoiceConfig } from "./mac-voice-config.ts"
@@ -19,6 +19,26 @@ const EX_TEMPFAIL = 75
 const WAV_HEADER_LENGTH = 44
 
 export const MAX_TEXT_LENGTH = 4000
+
+const VOICE_BOUNDARIES_MS = [25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 8000, 10000, 15000, 30000, 60000, 90000]
+
+/** One POST to the TTS server, by `resultado`: `ok`, or `falhou` when the speech fell back to `say`. */
+export const synthesisLatency = Metric.histogram("jarvis_voz_sintese_ms", {
+  description: "Duração da síntese no servidor Kokoro vista pelo cliente, em milissegundos.",
+  boundaries: VOICE_BOUNDARIES_MS
+})
+
+/** From the speak request to the player starting, by `motor` (kokoro or say). */
+export const timeToAudio = Metric.histogram("jarvis_voz_ate_audio_ms", {
+  description: "Tempo do pedido de fala até o áudio começar a tocar no Mac, em milissegundos.",
+  boundaries: VOICE_BOUNDARIES_MS
+})
+
+/** The whole speech on the Mac, playback included, by `motor`. */
+export const speechDuration = Metric.histogram("jarvis_voz_fala_ms", {
+  description: "Duração total de uma fala no Mac, síntese e reprodução incluídas, em milissegundos.",
+  boundaries: VOICE_BOUNDARIES_MS
+})
 
 /** Same rules as the Echo: plain text up to 4000 UTF-16 code units, no `<` or `>`, trimmed and not blank. */
 export const MacSpeechText = Schema.String.pipe(
@@ -83,6 +103,18 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
    * 10 seconds) yields None, and the caller falls back to `say`. Nothing has played at that point.
    */
   const synthesize = (text: string): Effect.Effect<Option.Option<Uint8Array>> =>
+    Effect.flatMap(Clock.currentTimeMillis, (start) => synthesizeOnce(text).pipe(
+      Effect.tap((wav) => {
+        const resultado = Option.isSome(wav) ? "ok" : "falhou"
+        return Effect.flatMap(Clock.currentTimeMillis, (end) =>
+          Effect.andThen(
+            Effect.annotateCurrentSpan({ "jarvis.tts.resultado": resultado }),
+            Metric.update(Metric.withAttributes(synthesisLatency, { resultado }), end - start)
+          ))
+      })
+    )).pipe(Effect.withSpan("MacVoice.synthesize"))
+
+  const synthesizeOnce = (text: string): Effect.Effect<Option.Option<Uint8Array>> =>
     Effect.gen(function*() {
       const request = HttpClientRequest.post(`${config.ttsUrl}/synthesize`).pipe(
         HttpClientRequest.bodyText(JSON.stringify({ text, voice: config.ttsVoice }), "application/json"),
@@ -97,8 +129,7 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
       return isWav(bytes) ? Option.some(bytes) : Option.none()
     }).pipe(
       Effect.timeoutOrElse({ duration: SYNTHESIS_TIMEOUT, orElse: () => Effect.succeed(Option.none()) }),
-      Effect.catch(() => Effect.succeed(Option.none<Uint8Array>())),
-      Effect.withSpan("MacVoice.synthesize")
+      Effect.catch(() => Effect.succeed(Option.none<Uint8Array>()))
     )
 
   // A single attempt. The process lives only inside exitCode's scope: on timeout or
@@ -150,11 +181,17 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
       Effect.catchTag("PlatformError", () => fail(`Could not create the directory of ${config.lock}. Nothing was spoken.`))
     )
     // Synthesis runs before taking the lock, so the lock is held only while audio plays.
+    const start = yield* Clock.currentTimeMillis
     const wav = yield* synthesize(text)
+    const motor = Option.isSome(wav) ? "kokoro" : "say"
+    yield* Effect.annotateCurrentSpan({ "jarvis.voz.motor": motor, "jarvis.voz.caracteres": text.length })
+    // The player starts right after synthesis, unless another speech holds the lock.
+    yield* Metric.update(Metric.withAttributes(timeToAudio, { motor }), (yield* Clock.currentTimeMillis) - start)
     yield* Option.match(wav, {
       onSome: playWav,
       onNone: () => play(sayCommand(text), SAY)
     })
+    yield* Metric.update(Metric.withAttributes(speechDuration, { motor }), (yield* Clock.currentTimeMillis) - start)
     return { status: "accepted", device: MAC_DEVICE, chunks: 1, playbackConfirmed: true } satisfies MacSpeechPlayed
   })
 

@@ -2,6 +2,7 @@
 import { BunRuntime, BunServices } from "@effect/platform-bun"
 import { AlexaConfig } from "@jarvis/alexa"
 import { GrokBotOutbox } from "@jarvis/grokbot"
+import * as Telemetry from "@jarvis/telemetry"
 import { Cause, Console, Effect, Layer, Logger, Runtime, Schema } from "effect"
 import { Command, Flag } from "effect/cli"
 import { CallbackConfig, CallbackTokenError, CallbackTransport, callbackUrl, loadCallbackToken } from "./callback-server.ts"
@@ -45,6 +46,10 @@ Effect.sync(() => process.umask(0o077)).pipe(
   Effect.andThen(Command.run(cli, { version })),
   Effect.tapCause(reportFailure),
   // stdout carries only the --print-url output.
-  Effect.provide(Layer.mergeAll(BunServices.layer, Layer.succeed(Logger.LogToStderr, true))),
+  Effect.provide(Layer.mergeAll(
+    BunServices.layer,
+    Layer.succeed(Logger.LogToStderr, true),
+    Telemetry.layer({ serviceName: "jarvis-callback", serviceVersion: version })
+  )),
   BunRuntime.runMain({ disableErrorReporting: true })
 )

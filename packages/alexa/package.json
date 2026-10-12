@@ -11,6 +11,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@jarvis/telemetry": "workspace:*",
     "alexa-cookie2": "5.0.6",
     "alexa-remote2": "8.1.1",
     "effect": "4.0.3"

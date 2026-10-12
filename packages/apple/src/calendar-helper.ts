@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, symlinkSync } 
 import { homedir } from "node:os"
 import { basename, isAbsolute, join } from "node:path"
 import { fileURLToPath } from "node:url"
+import { observe } from "@jarvis/telemetry"
 import { Context, Duration, Effect, Layer, Option, Semaphore } from "effect"
 import { ChildProcessSpawner } from "effect/process"
 import { AutomationError } from "./apple-error.ts"
@@ -158,7 +159,10 @@ export class CalendarHelper extends Context.Service<CalendarHelper, {
         if (!isAbsolute(path)) return yield* new AutomationError({ message: "The Calendar helper path must be absolute." })
         const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
         return CalendarHelper.of({
-          run: (args) => execute(spawner, command(path, args), "Calendar helper", QUERY_TIMEOUT)
+          run: (args) =>
+            execute(spawner, command(path, args), "Calendar helper", QUERY_TIMEOUT).pipe(
+              observe("apple.calendario_helper")
+            )
         })
       })
     )
@@ -172,7 +176,9 @@ export class CalendarHelper extends Context.Service<CalendarHelper, {
       const ensure = Semaphore.withPermits(lock, 1)(buildHelper(spawner))
       return CalendarHelper.of({
         run: (args) =>
-          Effect.flatMap(ensure, (path) => execute(spawner, command(path, args), "Calendar helper", QUERY_TIMEOUT))
+          Effect.flatMap(ensure, (path) => execute(spawner, command(path, args), "Calendar helper", QUERY_TIMEOUT)).pipe(
+            observe("apple.calendario_helper")
+          )
       })
     })
   )

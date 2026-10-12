@@ -12,6 +12,7 @@
     "build:native": "bun scripts/build-native.ts"
   },
   "dependencies": {
+    "@jarvis/telemetry": "workspace:*",
     "effect": "4.0.3"
   },
   "devDependencies": {
