@@ -1,6 +1,7 @@
 //! `FakeSaida`: saida deterministica sem dispositivo, com relogio manual.
 //! Usa o mesmo `Nucleo` do `CpalSaida`; o "dispositivo" e o `avancar`.
 
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -16,6 +17,9 @@ pub struct FakeSaida {
     frames: Mutex<u64>,
     gravado: Mutex<Vec<f32>>,
     latencia: Duration,
+    /// Espelho da taxa do nucleo: ler `nucleo.taxa()` toma o lock do produtor,
+    /// que fica preso enquanto `tocar` espera espaco (travaria o `avancar`).
+    taxa: AtomicU32,
 }
 
 impl FakeSaida {
@@ -27,6 +31,7 @@ impl FakeSaida {
             frames: Mutex::new(0),
             gravado: Mutex::new(Vec::new()),
             latencia: Duration::from_millis(10),
+            taxa: AtomicU32::new(taxa),
         }
     }
 
@@ -40,7 +45,7 @@ impl FakeSaida {
 
     /// Simula o dispositivo consumindo `frames`; devolve o que "tocou".
     pub fn avancar(&self, frames: usize) -> Vec<f32> {
-        let taxa = f64::from(self.nucleo.taxa());
+        let taxa = f64::from(self.taxa.load(Ordering::Relaxed));
         let mut out = vec![0.0; frames];
         let mut n = self.frames.lock().unwrap();
         let hora = self.base + Duration::from_secs_f64(*n as f64 / taxa);
@@ -71,6 +76,7 @@ impl FakeSaida {
     /// Simula troca de dispositivo/taxa: o buffer e preservado.
     pub fn reconstruir(&self, nova_taxa: u32) -> usize {
         let n = self.nucleo.reconstruir(nova_taxa, 1);
+        self.taxa.store(nova_taxa, Ordering::Relaxed);
         let _ = self.tx.send(EventoSaida::DispositivoMudou { nome: "fake".into(), taxa: nova_taxa });
         n
     }
@@ -89,7 +95,7 @@ impl Saida for FakeSaida {
     fn calar(&self, fade_ms: u32) {
         self.nucleo.ctl.fade_ms.store(fade_ms.clamp(1, 200), std::sync::atomic::Ordering::Relaxed);
         self.nucleo.ctl.pedidos.fetch_add(1, std::sync::atomic::Ordering::Release);
-        let frames = (u64::from(fade_ms) * u64::from(self.nucleo.taxa()) / 1000) as usize + 2;
+        let frames = (u64::from(fade_ms) * u64::from(self.taxa.load(Ordering::Relaxed)) / 1000) as usize + 2;
         self.avancar(frames);
     }
 
