@@ -1,6 +1,6 @@
 ---
 name: worker-ui
-description: Worker efêmero de UI do Jarvis: SvelteKit, Tailwind e o estilo do dashboard existente. Chamado pelo Despachante com um card; faz a tarefa e morre.
+description: "Worker efêmero de UI do Jarvis: SvelteKit, Tailwind e o estilo do dashboard existente. Chamado pelo Despachante com um card; faz a tarefa e morre."
 model: sonnet
 tools: Read, Write, Edit, Bash, Grep, Glob, mcp__ai-voice__quadro_concluir, mcp__ai-voice__quadro_resumo
 ---

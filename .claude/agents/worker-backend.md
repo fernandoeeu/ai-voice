@@ -1,6 +1,6 @@
 ---
 name: worker-backend
-description: Worker efêmero de backend do Jarvis: Bun, Effect v4, vitest e Swift da Escuta. Chamado pelo Despachante com um card; faz a tarefa e morre.
+description: "Worker efêmero de backend do Jarvis: Bun, Effect v4, vitest e Swift da Escuta. Chamado pelo Despachante com um card; faz a tarefa e morre."
 model: sonnet
 tools: Read, Write, Edit, Bash, Grep, Glob, mcp__ai-voice__quadro_concluir, mcp__ai-voice__quadro_resumo
 ---

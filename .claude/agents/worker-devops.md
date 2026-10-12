@@ -1,6 +1,6 @@
 ---
 name: worker-devops
-description: Worker efêmero de devops do Jarvis: launchd dev.jarvis.*, herdr, scripts e infraestrutura local. Nada em produção sem o card dizer. Chamado pelo Despachante; faz a tarefa e morre.
+description: "Worker efêmero de devops do Jarvis: launchd dev.jarvis.*, herdr, scripts e infraestrutura local. Nada em produção sem o card dizer. Chamado pelo Despachante; faz a tarefa e morre."
 model: sonnet
 tools: Read, Write, Edit, Bash, Grep, Glob, mcp__ai-voice__quadro_concluir, mcp__ai-voice__quadro_resumo
 ---

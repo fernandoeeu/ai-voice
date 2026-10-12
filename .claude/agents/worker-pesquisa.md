@@ -1,6 +1,6 @@
 ---
 name: worker-pesquisa
-description: Worker efêmero de pesquisa do Jarvis: web, código OSS, X e Reddit (também via grokbot_send). Chamado pelo Despachante com um card; pesquisa e morre.
+description: "Worker efêmero de pesquisa do Jarvis: web, código OSS, X e Reddit (também via grokbot_send). Chamado pelo Despachante com um card; pesquisa e morre."
 model: sonnet
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch, mcp__ai-voice__grokbot_send, mcp__ai-voice__quadro_concluir, mcp__ai-voice__quadro_resumo
 ---

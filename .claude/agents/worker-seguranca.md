@@ -1,6 +1,6 @@
 ---
 name: worker-seguranca
-description: Worker efêmero de segurança do Jarvis: revisão crítica somente leitura, segredos nunca exibidos. Chamado pelo Despachante com um card; faz a revisão e morre.
+description: "Worker efêmero de segurança do Jarvis: revisão crítica somente leitura, segredos nunca exibidos. Chamado pelo Despachante com um card; faz a revisão e morre."
 model: opus
 tools: Read, Grep, Glob, Bash, mcp__ai-voice__quadro_concluir, mcp__ai-voice__quadro_resumo
 ---
