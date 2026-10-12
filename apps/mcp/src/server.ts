@@ -5,6 +5,7 @@ import { FetchHttpClient } from "effect/http"
 import pkg from "../package.json" with { type: "json" }
 import { layer as AppleTools } from "./apple-toolkit.ts"
 import { layer as GrokBotTools } from "./grokbot-toolkit.ts"
+import { layer as HerdrTools } from "./herdr-toolkit.ts"
 import { Speaker, type SpeechOutput } from "./speaker.ts"
 import { makeVoiceToolkit, voiceHandlers } from "./voice-toolkit.ts"
 
@@ -75,11 +76,11 @@ export const OptionalGrokBotTools = Layer.unwrap(Effect.map(GrokBotConfigured, (
 /**
  * Serves MCP over stdin/stdout, the default transport for agents that spawn the server.
  *
- * Only stdio carries the Apple tools (reminders, calendar, maps, phone_call) and
+ * Only stdio carries the Apple tools (reminders, calendar, maps, phone_call), the herdr tools and
  * the optional `grokbot_send`: the client that spawned the process already runs
  * as the user on this Mac. The HTTP transport has no authentication, so it stays
  * voice-only.
  */
 export const StdioTransport = Layer.unwrap(Effect.map(serverOptions, (options) =>
-  Layer.mergeAll(VoiceTools, AppleTools, OptionalGrokBotTools).pipe(Layer.provide(McpServer.layerStdio(options)))
+  Layer.mergeAll(VoiceTools, AppleTools, HerdrTools, OptionalGrokBotTools).pipe(Layer.provide(McpServer.layerStdio(options)))
 ))
