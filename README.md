@@ -1,5 +1,9 @@
 # Jarvis
 
+## Instalar com o Claude Code
+
+Depois de clonar o repositório, abra o Claude Code na pasta e diga: **"Siga o INSTALAR-COM-CLAUDE.md"**. Ele confere os requisitos, instala o modo mínimo (dashboard e voz no Mac) e pergunta antes de mexer em qualquer configuração sua. Veja [INSTALAR-COM-CLAUDE.md](INSTALAR-COM-CLAUDE.md).
+
 **O Jarvis mora no seu Mac.** Ele escuta o que você fala, entrega o pedido aos agentes de código que estão trabalhando no herdr e responde em voz alta, no Mac ou na Echo da sala. Tem um super app com a conversa, a agenda e a telemetria, um maestro que nunca desliga e um painel que mostra cada serviço respirando.
 
 Você fala "Jarvis, roda os testes e me avisa", levanta da cadeira e ouve a resposta quando ela fica pronta. Sem palavra de ativação na nuvem, sem gravar nada fora do Mac: a transcrição é no próprio aparelho.
