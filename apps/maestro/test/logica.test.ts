@@ -128,6 +128,10 @@ describe("vigia", () => {
       "--resume", "abc", "--append-system-prompt-file", "/s.md", "--allowedTools", "Bash(/bin/fala:*)",
       "--settings", "/h.json"
     ])
+    expect(argsClaude({ ...base, model: "sonnet", resume: Option.some("abc") })).toEqual([
+      "--resume", "abc", "--model", "sonnet", "--append-system-prompt-file", "/s.md", "--allowedTools",
+      "Bash(/bin/fala:*)"
+    ])
   })
 })
 

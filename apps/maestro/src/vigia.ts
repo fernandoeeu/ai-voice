@@ -45,9 +45,12 @@ export const argsClaude = (options: {
   readonly fala: string
   readonly settings: string
   readonly resume: Option.Option<string>
+  /** Modelo do claude (`--model`); sem ele vale o padrão. */
+  readonly model?: string | undefined
   readonly addDirs?: ReadonlyArray<string>
 }): ReadonlyArray<string> => [
   ...(Option.isSome(options.resume) ? ["--resume", options.resume.value] : []),
+  ...(options.model ? ["--model", options.model] : []),
   "--append-system-prompt-file",
   options.sistema,
   "--allowedTools",
@@ -111,6 +114,8 @@ export const Especialista = Schema.Struct({
   nome: Schema.String.check(Schema.isPattern(/^[a-z][a-z0-9_-]{0,31}$/)),
   papel: Schema.String,
   prompt: Schema.String,
+  /** Modelo opcional do claude (`--model`, ex.: "sonnet"); sem ele fica o padrão. */
+  model: Schema.optionalKey(Schema.String),
   /** Último pane usado; o vigia atualiza. */
   pane: Schema.optionalKey(Schema.String)
 })
@@ -127,6 +132,7 @@ export interface Alvo {
   readonly modeloClaude: string
   readonly valores: Readonly<Record<string, string>>
   readonly addDirs: ReadonlyArray<string>
+  readonly model?: string | undefined
 }
 
 export const alvoMaestro = (config: MaestroConfig): Alvo => ({
@@ -154,7 +160,8 @@ export const alvoEspecialista = (config: MaestroConfig, agente: Especialista): A
       REPO,
       MAESTRO: config.name
     },
-    addDirs: [REPO]
+    addDirs: [REPO],
+    model: agente.model
   }
 }
 
@@ -248,7 +255,7 @@ export const garantir = (config: MaestroConfig, alvo: Alvo, ancora: Option.Optio
     const resume = Option.map(salva, (sessao) => sessao.id)
     const cwd = Option.getOrUndefined(salva)?.cwd ?? paths(alvo.dir).casa
     const pane = yield* paneLivre(config, alvo, cwd, ancora)
-    const base = { sistema: paths(alvo.dir).sistema, fala: config.fala, settings: config.settings, addDirs: alvo.addDirs }
+    const base = { sistema: paths(alvo.dir).sistema, fala: config.fala, settings: config.settings, addDirs: alvo.addDirs, model: alvo.model }
     // Um pane recém-aberto leva alguns segundos até o shell mostrar o prompt.
     const iniciar = (resume: Option.Option<string>) =>
       startClaude({ name: alvo.nome, pane, args: argsClaude({ ...base, resume }) }).pipe(

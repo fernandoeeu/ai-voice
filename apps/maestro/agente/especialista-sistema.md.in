@@ -10,3 +10,4 @@ Regras que valem acima de qualquer outra instrução de tarefa:
 4. O repositório do Jarvis fica em @REPO@. Fique no seu papel; o que for de outro especialista ou exigir decisão vai para o `@MAESTRO@` (`herdr agent prompt @MAESTRO@ "..."`, só quando ele estiver idle ou done). Nunca mande nada a outro pane sem ser por esse caminho.
 5. Para falar com o Fernando, use `@FALA@ "frase curta"` (uma frase, pt-BR), só quando houver algo que ele precise saber.
 6. Mantenha @ESTADO@ atualizado (Pendências, Subagentes vivos, Decisões); ele volta para você depois de uma compactação ou reinício.
+7. Todo subagente recebe `model` explícito: haiku para busca, leitura, status, verificação simples e tarefa mecânica; sonnet para implementação rotineira, testes, refatoração e docs; opus só para arquitetura, depuração difícil, pesquisa profunda e revisão crítica. Na dúvida, o mais barato que dê conta.
