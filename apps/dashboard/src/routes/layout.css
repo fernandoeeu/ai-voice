@@ -1,0 +1,179 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn-svelte/tailwind.css";
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/jetbrains-mono/wght.css";
+
+@custom-variant dark (&:is(.dark *));
+
+/*
+ * Light is form stock, dark is carbon paper. Ink is navy, printed labels are carbon blue,
+ * and vermilion is rubber-stamp ink: only the default mark and the receipt stamp use it.
+ */
+:root {
+	--paper: oklch(0.975 0.006 250);
+	--paper-sunk: oklch(0.948 0.012 252);
+	--ink: oklch(0.25 0.055 265);
+	--ink-soft: oklch(0.45 0.04 262);
+	--rule: oklch(0.87 0.018 255);
+	--rule-strong: oklch(0.76 0.03 258);
+	--carbon: oklch(0.45 0.15 266);
+	--stamp: oklch(0.53 0.18 40);
+	--signal: oklch(0.5 0.12 158);
+	--alert: oklch(0.5 0.19 22);
+	--caution: oklch(0.5 0.11 70);
+
+	--background: var(--paper);
+	--foreground: var(--ink);
+	--card: var(--paper);
+	--card-foreground: var(--ink);
+	--popover: var(--paper);
+	--popover-foreground: var(--ink);
+	--primary: var(--ink);
+	--primary-foreground: var(--paper);
+	--secondary: var(--paper-sunk);
+	--secondary-foreground: var(--ink);
+	--muted: var(--paper-sunk);
+	--muted-foreground: var(--ink-soft);
+	--accent: oklch(0.93 0.02 258);
+	--accent-foreground: var(--ink);
+	--destructive: var(--alert);
+	--border: var(--rule);
+	--input: var(--rule-strong);
+	--ring: var(--carbon);
+	--radius: 0.25rem;
+
+	--ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+	--ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+
+	color-scheme: light;
+}
+
+.dark {
+	--paper: oklch(0.205 0.042 272);
+	--paper-sunk: oklch(0.172 0.036 272);
+	--ink: oklch(0.935 0.014 262);
+	--ink-soft: oklch(0.74 0.03 264);
+	--rule: oklch(0.31 0.045 272);
+	--rule-strong: oklch(0.42 0.05 270);
+	--carbon: oklch(0.78 0.1 264);
+	--stamp: oklch(0.74 0.15 50);
+	--signal: oklch(0.78 0.13 158);
+	--alert: oklch(0.72 0.16 22);
+	--caution: oklch(0.8 0.12 80);
+	--accent: oklch(0.26 0.05 272);
+
+	color-scheme: dark;
+}
+
+@theme inline {
+	--font-sans: "Archivo Variable", ui-sans-serif, system-ui, sans-serif;
+	--font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+
+	--color-paper: var(--paper);
+	--color-paper-sunk: var(--paper-sunk);
+	--color-ink: var(--ink);
+	--color-ink-soft: var(--ink-soft);
+	--color-rule: var(--rule);
+	--color-rule-strong: var(--rule-strong);
+	--color-carbon: var(--carbon);
+	--color-stamp: var(--stamp);
+	--color-signal: var(--signal);
+	--color-alert: var(--alert);
+	--color-caution: var(--caution);
+
+	--color-ring: var(--ring);
+	--color-input: var(--input);
+	--color-border: var(--border);
+	--color-destructive: var(--destructive);
+	--color-accent-foreground: var(--accent-foreground);
+	--color-accent: var(--accent);
+	--color-muted-foreground: var(--muted-foreground);
+	--color-muted: var(--muted);
+	--color-secondary-foreground: var(--secondary-foreground);
+	--color-secondary: var(--secondary);
+	--color-primary-foreground: var(--primary-foreground);
+	--color-primary: var(--primary);
+	--color-popover-foreground: var(--popover-foreground);
+	--color-popover: var(--popover);
+	--color-card-foreground: var(--card-foreground);
+	--color-card: var(--card);
+	--color-foreground: var(--foreground);
+	--color-background: var(--background);
+	--radius-sm: calc(var(--radius) * 0.6);
+	--radius-md: calc(var(--radius) * 0.8);
+	--radius-lg: var(--radius);
+	--radius-xl: calc(var(--radius) * 1.4);
+}
+
+@layer base {
+	* {
+		@apply border-border outline-ring/50;
+	}
+	html {
+		@apply font-sans;
+		font-optical-sizing: auto;
+		-webkit-font-smoothing: antialiased;
+		text-rendering: optimizeLegibility;
+		scrollbar-color: var(--rule-strong) transparent;
+	}
+	body {
+		@apply bg-background text-foreground;
+		min-height: 100dvh;
+	}
+	::selection {
+		background: color-mix(in oklch, var(--carbon) 28%, transparent);
+		color: var(--ink);
+	}
+	:focus-visible {
+		outline: 2px solid var(--carbon);
+		outline-offset: 2px;
+	}
+	code,
+	kbd,
+	samp {
+		@apply font-mono;
+		font-variant-ligatures: none;
+	}
+}
+
+@utility tabular {
+	font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* Printed field labels on a form: condensed, set small, never above a heading. */
+@utility field-label {
+	font-stretch: 78%;
+	font-weight: 600;
+	font-size: 0.75rem;
+	letter-spacing: 0.06em;
+	text-transform: uppercase;
+	color: var(--carbon);
+}
+
+@utility display {
+	font-stretch: 118%;
+	font-weight: 640;
+	letter-spacing: -0.02em;
+}
+
+/* Writing lines that stay locked to the text's line-height. */
+@utility ruled {
+	--line: 1.75rem;
+	line-height: var(--line);
+	background-image: linear-gradient(
+		to bottom,
+		transparent calc(var(--line) - 1px),
+		var(--rule) calc(var(--line) - 1px)
+	);
+	background-size: 100% var(--line);
+	background-attachment: local;
+}
+
+/* The tear-off edge between the slip and its receipt. */
+@utility perforated {
+	background-image: radial-gradient(circle, var(--rule-strong) 1.25px, transparent 1.5px);
+	background-size: 9px 4px;
+	background-repeat: repeat-x;
+	background-position: 0 0;
+}

@@ -1,0 +1,31 @@
+#!/usr/bin/env bun
+import { BunRuntime, BunServices } from "@effect/platform-bun"
+import { AlexaError } from "@jarvis/alexa"
+import { Cause, Console, Effect, Layer, Logger, Runtime, Schema } from "effect"
+import { Command } from "effect/cli"
+import { cli } from "./cli.ts"
+import { version } from "./server.ts"
+
+const isAlexaError = Schema.is(AlexaError)
+
+const reportFailure = (cause: Cause.Cause<unknown>) => {
+  if (Cause.hasInterruptsOnly(cause)) return Effect.void
+  const error = Cause.squash(cause)
+  // Alexa errors carry messages that are safe and actionable on their own.
+  if (isAlexaError(error)) return Console.error(error.message)
+  // The CLI already rendered its own help or usage errors.
+  if (!Runtime.getErrorReported(error)) return Effect.void
+  return Effect.logError(cause)
+}
+
+Effect.sync(() => process.umask(0o077)).pipe(
+  Effect.andThen(Command.run(cli, { version })),
+  Effect.tapCause(reportFailure),
+  // stdout is the MCP channel: every log line must go to stderr.
+  Effect.provide(Layer.mergeAll(BunServices.layer, Layer.succeed(Logger.LogToStderr, true))),
+  BunRuntime.runMain({
+    disableErrorReporting: true,
+    // The stdio transport interrupts the program when the client closes stdin; like a signal, that is a clean stop.
+    teardown: (exit, onExit) => Runtime.defaultTeardown(exit, (code) => onExit(code === 130 ? 0 : code))
+  })
+)

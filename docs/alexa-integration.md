@@ -77,6 +77,6 @@ A positive response means "accepted by the API". It is never proof of audible pl
 
 ## Known dependency advisory
 
-`npm audit` reports five high-severity packages through one transitive chain: `braces@3.0.3`, pulled in by the proxy middleware of `alexa-cookie2`. The advisory describes a denial of service through deeply nested patterns and lists no fixed version. ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm))
+An `npm audit` run on the original project reported five high-severity packages through one transitive chain: `braces@3.0.3`, pulled in by the proxy middleware of `alexa-cookie2`. The same dependencies are used here; re-run `bun audit` to see the current state. The advisory describes a denial of service through deeply nested patterns and lists no fixed version. ([GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm))
 
-The affected code runs only in the login proxy, which is bound to loopback and alive only during the `login` command. That reduces exposure; it does not fix the dependency. Separately, `package.json` overrides `cookie` to `0.7.2` to resolve a low-severity advisory.
+The affected code runs only in the login proxy, which is bound to loopback and alive only during the `login` command. That reduces exposure; it does not fix the dependency.

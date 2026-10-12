@@ -19,14 +19,14 @@ Setting `AI_VOICE_HTTP_PORT` switches the server from stdio to Streamable HTTP o
 ```sh
 AI_VOICE_HTTP_HOST=PRIVATE-IP AI_VOICE_HTTP_PORT=7347 \
 AI_VOICE_ENABLE_SPEECH=1 AI_VOICE_DEFAULT_DEVICE=SERIAL \
-npx -y @henriquearthur/ai-voice
+bun /ABS/PATH/apps/mcp/src/main.ts
 ```
 
 It logs `AI Voice listening on http://PRIVATE-IP:7347/mcp` to stderr.
 
 ## Keep it running with systemd
 
-On Linux, create `~/.config/systemd/user/ai-voice.service`, replacing the placeholders. Install AI Voice globally on the host with `npm install -g @henriquearthur/ai-voice`, so the service runs a fixed version, and get the absolute path of the command with `which ai-voice`. If the service cannot find `node`, add an `Environment=PATH=` line that includes its directory.
+On Linux, create `~/.config/systemd/user/ai-voice.service`, replacing the placeholders. Get the absolute path of Bun with `which bun`, and of this repository's `apps/mcp/src/main.ts`. If the service cannot find `bun`, add an `Environment=PATH=` line that includes its directory.
 
 ```ini
 [Unit]
@@ -39,7 +39,7 @@ Environment=AI_VOICE_HTTP_HOST=PRIVATE-IP
 Environment=AI_VOICE_HTTP_PORT=7347
 Environment=AI_VOICE_ENABLE_SPEECH=1
 Environment=AI_VOICE_DEFAULT_DEVICE=SERIAL
-ExecStart=/path/to/ai-voice
+ExecStart=/path/to/bun /ABS/PATH/apps/mcp/src/main.ts
 Restart=on-failure
 RestartSec=5
 
