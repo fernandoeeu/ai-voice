@@ -87,7 +87,19 @@ for label in "${LABELS[@]}"; do
 	rm -f "$out"
 	launchctl bootout "$DOMAIN/$label" 2>/dev/null || true
 	for _ in $(seq 1 50); do launchctl print "$DOMAIN/$label" >/dev/null 2>&1 || break; sleep 0.2; done
-	launchctl bootstrap "$DOMAIN" "$AGENTS_DIR/$label.plist"
+	# O bootout é assíncrono: mesmo após o print falhar, o bootstrap pode dar "Bootstrap failed: 5".
+	carregado=0
+	for tentativa in 1 2 3 4 5; do
+		if launchctl bootstrap "$DOMAIN" "$AGENTS_DIR/$label.plist"; then
+			carregado=1
+			break
+		fi
+		if [ "$tentativa" -lt 5 ]; then sleep 1; fi
+	done
+	if [ "$carregado" != 1 ]; then
+		echo "Falha ao carregar $label após 5 tentativas de launchctl bootstrap." >&2
+		exit 1
+	fi
 	echo "Carregado: $label"
 done
 

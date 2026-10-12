@@ -117,7 +117,7 @@ describe("launchctl", () => {
     const relogio = new RelogioExecucoes()
     const tabela = new Tabela([])
     const lista = parseLaunchctlList(LIST)
-    const logs = new Map([["dev.jarvis.maestro", 1_000_000]])
+    const logs = new Map([["dev.jarvis.maestro", 1_990_000]])
     const coletar = (print: string, agora: number) =>
       montarServicos(["dev.jarvis.maestro"], lista, new Map([["dev.jarvis.maestro", parseLaunchctlPrint(print)]]), tabela, {
         logsMs: logs,
@@ -132,7 +132,7 @@ describe("launchctl", () => {
       intervalo_s: 60,
       reinicios: null,
       execucoes: 11,
-      ultima_execucao_em: new Date(1_000_000).toISOString(),
+      ultima_execucao_em: new Date(1_990_000).toISOString(),
       ultima_saida: "0"
     })
     // O runs subiu entre duas coletas: rodou agora há pouco, mesmo sem escrever log.
@@ -142,6 +142,16 @@ describe("launchctl", () => {
     expect(coletar(PRINT_MAESTRO.replace("runs = 11", "runs = 12"), 2_010_000).ultima_execucao_em).toBe(
       new Date(2_005_000).toISOString()
     )
+  })
+
+  it("log antigo só conta depois de observar um intervalo inteiro", () => {
+    const relogio = new RelogioExecucoes()
+    // Coletor acabou de subir: log de 5 min atrás não prova que o serviço parou.
+    expect(relogio.registrar("x", 11, false, 1_000_000, 1_300_000, 60)).toBeNull()
+    // Passou mais de um intervalo sem o runs subir: aí o log antigo é a melhor pista.
+    expect(relogio.registrar("x", 11, false, 1_000_000, 1_380_000, 60)).toBe(1_000_000)
+    // Log recente vale desde a primeira coleta.
+    expect(new RelogioExecucoes().registrar("y", 3, false, 1_290_000, 1_300_000, 60)).toBe(1_290_000)
   })
 
   it("periódico só pelo plist (StartCalendarInterval)", () => {

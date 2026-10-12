@@ -71,17 +71,30 @@ export const parseAgendaPlist = (xml: string): Agenda | null => {
 /**
  * Quando cada serviço periódico rodou pela última vez. O launchd não guarda a hora, então vale a
  * melhor pista: agora, se o processo está no ar; a coleta em que o `runs` subiu; ou o mtime dos logs.
+ * Logs antigos não bastam logo depois que o coletor sobe (o serviço pode rodar sem escrever nada):
+ * até observar um intervalo inteiro, uma pista anterior ao início da observação e mais velha que um
+ * intervalo vira null (desconhecida), em vez de parecer atraso.
  */
 export class RelogioExecucoes {
-  private readonly vistos = new Map<string, { runs: number | null; em: number | null }>()
+  private readonly vistos = new Map<string, { runs: number | null; em: number | null; desde: number }>()
 
-  registrar(label: string, runs: number | null, rodando: boolean, logsMs: number | null, agora: number): number | null {
+  registrar(
+    label: string,
+    runs: number | null,
+    rodando: boolean,
+    logsMs: number | null,
+    agora: number,
+    intervaloS: number | null = null
+  ): number | null {
     const antes = this.vistos.get(label)
+    const desde = antes?.desde ?? agora
     let em = antes?.em ?? null
     if (rodando || (antes !== undefined && runs !== null && antes.runs !== null && runs > antes.runs)) em = agora
     if (logsMs !== null && (em === null || logsMs > em)) em = logsMs
-    this.vistos.set(label, { runs, em })
-    return em
+    this.vistos.set(label, { runs, em, desde })
+    if (em === null || intervaloS === null || em >= desde) return em
+    const janela = (intervaloS + 15) * 1000
+    return agora - desde < janela && agora - em > janela ? null : em
   }
 }
 
@@ -131,9 +144,11 @@ export const montarServicos = (
     const agenda = opcoes.agendas?.get(label)
     const periodico = agenda !== undefined || detalhe?.intervaloS != null
     const execucoes = detalhe?.execucoes ?? null
+    const intervaloS = detalhe?.intervaloS ?? agenda?.intervaloS ?? null
     const ultimaExecucao = periodico
-      ? (opcoes.relogio?.registrar(label, execucoes, vivo, opcoes.logsMs?.get(label) ?? null, agora) ??
-        opcoes.logsMs?.get(label) ?? null)
+      ? opcoes.relogio
+        ? opcoes.relogio.registrar(label, execucoes, vivo, opcoes.logsMs?.get(label) ?? null, agora, intervaloS)
+        : opcoes.logsMs?.get(label) ?? null
       : null
     return {
       label,
@@ -141,7 +156,7 @@ export const montarServicos = (
       vivo,
       pid,
       periodico,
-      intervalo_s: detalhe?.intervaloS ?? agenda?.intervaloS ?? null,
+      intervalo_s: intervaloS,
       reinicios: !periodico && execucoes !== null ? Math.max(0, execucoes - 1) : null,
       execucoes,
       ultima_execucao_em: ultimaExecucao !== null ? new Date(ultimaExecucao).toISOString() : null,
