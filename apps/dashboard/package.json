@@ -7,7 +7,7 @@
 		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview",
-		"start": "HOST=127.0.0.1 bun ./build/index.js",
+		"start": "HOST=127.0.0.1 bun ./scripts/serve.mjs",
 		"app:install": "./scripts/install-launchagent.sh",
 		"prepare": "svelte-kit sync || echo ''",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json && tsc -p src/service-worker",

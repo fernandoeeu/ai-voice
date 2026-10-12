@@ -49,6 +49,8 @@ cp -R "$APP_DIR/build" "$RELEASE_DIR.next"
 rm -rf "$RELEASE_DIR.prev"
 [ -d "$RELEASE_DIR" ] && mv "$RELEASE_DIR" "$RELEASE_DIR.prev"
 mv "$RELEASE_DIR.next" "$RELEASE_DIR"
+# Servidor próprio (protocolo http + só Hosts locais/LAN), ao lado do handler.js do build.
+cp "$APP_DIR/scripts/serve.mjs" "$APP_DIR/scripts/hosts-locais.mjs" "$RELEASE_DIR/"
 rm -rf "$RELEASE_DIR.prev"
 
 mkdir -p "$LOG_DIR" "$(dirname "$PLIST")"
@@ -66,7 +68,7 @@ cat >"$NEW_PLIST" <<PLIST
   <key>ProgramArguments</key>
   <array>
     <string>$(xml "$BUN")</string>
-    <string>$(xml "$RELEASE_DIR/index.js")</string>
+    <string>$(xml "$RELEASE_DIR/serve.mjs")</string>
   </array>
   <key>WorkingDirectory</key><string>$(xml "$APP_DIR")</string>
   <key>EnvironmentVariables</key>
