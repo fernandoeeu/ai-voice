@@ -35,6 +35,34 @@ export type Agente = {
 	readonly desde: number | null;
 	readonly ramBytes: number | null;
 	readonly cpuPct: number | null;
+	/** The agent's session id (Claude Code session), when the collector knows it. */
+	readonly sessao: string | null;
+	/** Every subagent the agent opened, direct or nested (see `paiId`); empty when there are none. */
+	readonly subagentes: ReadonlyArray<Subagente>;
+	/** The collector sent the `subagentes` field at all (false: an older collector, so the list says nothing). */
+	readonly subagentesPublicados: boolean;
+};
+
+/** rodando: working now · parado: alive but quiet · terminou: has ended. */
+export type SubagenteEstado = 'rodando' | 'parado' | 'terminou';
+
+export type Subagente = {
+	readonly id: string;
+	/** The subagent that opened this one; null when the herdr agent itself opened it. */
+	readonly paiId: string | null;
+	/** Who opened it, as the collector names it (agent or subagent). */
+	readonly abertoPor: string | null;
+	readonly descricao: string;
+	readonly tipo: string | null;
+	readonly estado: SubagenteEstado;
+	readonly inicio: number | null;
+	readonly fim: number | null;
+	readonly duracaoS: number | null;
+	readonly ultimaAtividadeEm: number | null;
+	/** What it is waiting on right now, if anything. */
+	readonly aguardando: string | null;
+	/** How it ended, in a line. */
+	readonly resumoFim: string | null;
 };
 
 export type Herdr = {
@@ -196,6 +224,36 @@ function agenteEstado(v: unknown): AgenteEstado {
 	return 'unknown';
 }
 
+function subagenteEstado(v: unknown, fim: number | null): SubagenteEstado {
+	const s = typeof v === 'string' ? v.toLowerCase() : '';
+	if (['rodando', 'running', 'working', 'ativo', 'active'].includes(s)) return 'rodando';
+	if (['parado', 'stalled', 'idle', 'ocioso', 'waiting', 'aguardando'].includes(s)) return 'parado';
+	if (['terminou', 'terminado', 'done', 'finished', 'completed', 'concluido', 'concluído', 'stopped', 'failed'].includes(s)) return 'terminou';
+	return fim === null ? 'rodando' : 'terminou';
+}
+
+function subagente(o: Obj): Subagente | null {
+	const id = str(pick(o, ['id', 'agent_id', 'agentId', 'tool_use_id', '__chave']));
+	if (!id) return null;
+	const inicio = instant(pick(o, ['inicio', 'start', 'started_at', 'startedAt']));
+	const fim = instant(pick(o, ['fim', 'end', 'ended_at', 'endedAt']));
+	const tipo = str(pick(o, ['tipo', 'type', 'subagent_type', 'subagentType']));
+	return {
+		id,
+		paiId: str(pick(o, ['pai_id', 'paiId', 'parent_id', 'parentId'])),
+		abertoPor: str(pick(o, ['aberto_por', 'abertoPor', 'opened_by', 'openedBy'])),
+		descricao: str(pick(o, ['descricao', 'description', 'titulo', 'title'])) ?? tipo ?? id,
+		tipo,
+		estado: subagenteEstado(pick(o, ['estado', 'state', 'status']), fim),
+		inicio,
+		fim,
+		duracaoS: num(pick(o, ['duracao_s', 'duracaoS', 'duration_s'])),
+		ultimaAtividadeEm: instant(pick(o, ['ultima_atividade_em', 'ultimaAtividadeEm', 'last_activity_at'])),
+		aguardando: str(pick(o, ['aguardando', 'waiting_on', 'waitingOn'])),
+		resumoFim: str(pick(o, ['resumo_fim', 'resumoFim', 'summary']))
+	};
+}
+
 function agente(o: Obj, now: number, workspace: string | null): Agente | null {
 	const id = str(pick(o, ['id', 'pane', 'pane_id', 'agente', 'nome', 'name', '__chave']));
 	if (!id) return null;
@@ -205,6 +263,8 @@ function agente(o: Obj, now: number, workspace: string | null): Agente | null {
 	const filhos = pick(o, ['filhos', 'children']);
 	const somar = (a: number | null, b: number | null) => (a === null ? b : b === null ? a : a + b);
 	const noEstadoMs = num(pick(o, ['tempoNoEstadoMs', 'tempo_no_estado_ms', 'noEstadoMs']));
+	const subsRaw = pick(o, ['subagentes', 'subagents']);
+	const subs = Array.isArray(subsRaw) ? subsRaw.filter(isObj) : [];
 	return {
 		id,
 		nome: str(pick(o, ['nome', 'name', 'titulo', 'title', 'agente'])) ?? id,
@@ -212,7 +272,10 @@ function agente(o: Obj, now: number, workspace: string | null): Agente | null {
 		estado: agenteEstado(pick(o, ['estado', 'state', 'status'])),
 		desde: desdeDireto ?? (noEstadoMs !== null ? now - noEstadoMs : noEstadoS !== null ? now - noEstadoS * 1000 : null),
 		ramBytes: somar(ram(o), isObj(filhos) ? ram(filhos) : null),
-		cpuPct: somar(num(pick(o, CPU)), isObj(filhos) ? num(pick(filhos, CPU)) : null)
+		cpuPct: somar(num(pick(o, CPU)), isObj(filhos) ? num(pick(filhos, CPU)) : null),
+		sessao: str(pick(o, ['sessao', 'session', 'session_id', 'sessionId'])),
+		subagentes: subs.map(subagente).filter((x): x is Subagente => x !== null),
+		subagentesPublicados: subsRaw !== undefined
 	};
 }
 
@@ -326,6 +389,64 @@ export const ESTADO_ROTULO: Record<AgenteEstado, string> = {
 
 /** Order on screen: what needs attention first. */
 export const ESTADO_ORDEM: Record<AgenteEstado, number> = { blocked: 0, working: 1, done: 2, idle: 3, unknown: 4 };
+
+/** A subagent still going: running, or alive and quiet. */
+export const subagenteAtivo = (s: Subagente) => s.estado !== 'terminou' && s.fim === null;
+
+export type NoSubagente = {
+	readonly sub: Subagente;
+	readonly filhos: ReadonlyArray<NoSubagente>;
+	/** Itself or anything under it is still going: shown open, above the finished ones. */
+	readonly ativo: boolean;
+};
+
+const SUB_ORDEM: Record<SubagenteEstado, number> = { rodando: 0, parado: 1, terminou: 2 };
+
+/**
+ * The flat list as a tree: the agent's direct subagents at the root, each holding the ones it opened.
+ * A `paiId` that names nobody in the list (or names the agent itself) puts the subagent at the root; cycles are cut.
+ * Each level: what is still going first (running before quiet, oldest first), then the finished, newest first.
+ */
+export function arvoreSubagentes(subs: ReadonlyArray<Subagente>): NoSubagente[] {
+	const porId = new Map(subs.map((s) => [s.id, s]));
+	const filhosDe = new Map<string | null, Subagente[]>();
+	for (const s of subs) {
+		const pai = s.paiId !== null && s.paiId !== s.id && porId.has(s.paiId) ? s.paiId : null;
+		filhosDe.set(pai, [...(filhosDe.get(pai) ?? []), s]);
+	}
+	const visto = new Set<string>();
+	const montar = (pai: string | null): NoSubagente[] =>
+		(filhosDe.get(pai) ?? [])
+			.filter((s) => !visto.has(s.id) && (visto.add(s.id), true))
+			.map((sub) => {
+				const filhos = montar(sub.id);
+				return { sub, filhos, ativo: subagenteAtivo(sub) || filhos.some((f) => f.ativo) };
+			})
+			.sort((a, b) =>
+				a.ativo !== b.ativo
+					? (a.ativo ? -1 : 1)
+					: a.ativo
+						? SUB_ORDEM[a.sub.estado] - SUB_ORDEM[b.sub.estado] || (a.sub.inicio ?? 0) - (b.sub.inicio ?? 0)
+						: (b.sub.fim ?? b.sub.inicio ?? 0) - (a.sub.fim ?? a.sub.inicio ?? 0)
+			);
+	const raizes = montar(null);
+	// Whatever a cycle left out still shows, at the root.
+	for (const s of subs) if (!visto.has(s.id)) raizes.push({ sub: s, filhos: [], ativo: subagenteAtivo(s) });
+	return raizes;
+}
+
+/** Counts across the whole tree, for the agent's header. */
+export function contarSubagentes(subs: ReadonlyArray<Subagente>) {
+	const ativos = subs.filter(subagenteAtivo);
+	return {
+		rodando: ativos.filter((s) => s.estado === 'rodando').length,
+		parados: ativos.filter((s) => s.estado !== 'rodando').length,
+		concluidos: subs.length - ativos.length,
+		total: subs.length
+	};
+}
+
+export const SUBAGENTE_ROTULO: Record<SubagenteEstado, string> = { rodando: 'Rodando', parado: 'Parado', terminou: 'Concluído' };
 
 export const vazio = (painelUrl: string, coletorUrl: string): Painel => ({
 	geradoEm: Date.now(),
