@@ -1,6 +1,7 @@
 import type { Component } from 'svelte';
 import CalendarBlank from 'phosphor-svelte/lib/CalendarBlank';
 import ChatsCircle from 'phosphor-svelte/lib/ChatsCircle';
+import Kanban from 'phosphor-svelte/lib/Kanban';
 import ListChecks from 'phosphor-svelte/lib/ListChecks';
 import NavigationArrow from 'phosphor-svelte/lib/NavigationArrow';
 import Robot from 'phosphor-svelte/lib/Robot';
@@ -22,5 +23,6 @@ export const modules: ReadonlyArray<JarvisModule> = [
 	{ id: 'agenda', label: 'Agenda', href: '/agenda', icon: CalendarBlank },
 	{ id: 'ir', label: 'Ir & ligar', href: '/ir', icon: NavigationArrow },
 	{ id: 'telemetria', label: 'Telemetria', href: '/telemetria', icon: Pulse },
-	{ id: 'agentes', label: 'Agentes', href: '/agentes', icon: Robot }
+	{ id: 'agentes', label: 'Agentes', href: '/agentes', icon: Robot },
+	{ id: 'quadro', label: 'Quadro', href: '/quadro', icon: Kanban }
 ];
