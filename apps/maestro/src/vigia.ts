@@ -256,7 +256,12 @@ export const garantir = (config: MaestroConfig, alvo: Alvo, ancora: Option.Optio
           while: (error) => error._tag === "HerdrRejected" && /available shell/.test(error.message),
           schedule: Schedule.spaced("1 second"),
           times: 20
-        })
+        }),
+        // Bloqueado num diálogo de início (aviso de limite, confiança): o claude subiu e o pane é dele.
+        Effect.catchIf(
+          (error) => error._tag === "HerdrRejected" && error.code === "agent_not_ready",
+          (error) => Effect.logWarning(`${alvo.nome} subiu bloqueado num diálogo: ${error.message}`)
+        )
       )
 
     const retomou = yield* iniciar(resume).pipe(
