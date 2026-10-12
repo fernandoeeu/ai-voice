@@ -14,6 +14,12 @@ LABEL="dev.jarvis.escuta"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 STATE="$JARVIS/escuta"
 
+# Ajustes do scripts/setup.sh; vazio = o padrão da própria escuta (Config.swift).
+CONFIG="${JARVIS_CONFIG:-$HOME/.config/jarvis/jarvis.env}"
+# shellcheck disable=SC1090
+[ -f "$CONFIG" ] && . "$CONFIG"
+xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
+
 swift build -c release --package-path "$PKG"
 BIN="$(swift build -c release --package-path "$PKG" --show-bin-path)/Escuta"
 
@@ -43,8 +49,9 @@ cat > "$PLIST" <<EOF
     <key>ESCUTA_SILENCIO</key><string>1.3</string>
     <key>ESCUTA_CONVERSA</key><string>8</string>
     <key>ESCUTA_SILENCIO_ABERTA</key><string>2.5</string>
-    <key>ESCUTA_PANE</key><string>wT2:p2</string>
-    <key>ESCUTA_ORQUESTRADOR</key><string>maestro</string>
+    <key>ESCUTA_PANE</key><string>$(xml "${ESCUTA_PANE:-}")</string>
+    <key>ESCUTA_ORQUESTRADOR</key><string>$(xml "${ESCUTA_ORQUESTRADOR:-}")</string>
+    <key>ESCUTA_MIC</key><string>$(xml "${ESCUTA_MIC:-}")</string>
     <key>PATH</key><string>$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
   </dict>
   <key>RunAtLoad</key><true/>
