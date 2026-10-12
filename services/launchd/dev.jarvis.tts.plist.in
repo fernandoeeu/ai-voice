@@ -18,6 +18,7 @@
     <key>HF_HOME</key><string>@TTS_HOME@/hf-cache</string>
     <key>PYTHONUNBUFFERED</key><string>1</string>
     <key>JARVIS_TTS_VOICE</key><string>@AI_VOICE_TTS_VOICE@</string>
+    <key>JARVIS_TTS_SPEED</key><string>1.15</string>
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>

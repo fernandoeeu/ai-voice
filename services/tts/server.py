@@ -6,7 +6,7 @@ lado deste arquivo); quem baixa é o services/tts/install.sh do repositório.
 
   GET  /health      -> 200 quando o modelo está carregado e aquecido
   GET  /voices      -> lista de vozes disponíveis
-  POST /synthesize  -> {"text": "...", "voice": "pf_dora", "speed": 1.0} -> audio/wav
+  POST /synthesize  -> {"text": "...", "voice": "pf_dora", "speed": 1.15} -> audio/wav
 
 Telemetria: traces e métricas OpenTelemetry (service.name "jarvis-tts") por OTLP HTTP para
 OTEL_EXPORTER_OTLP_ENDPOINT (padrão http://127.0.0.1:4318). A exportação roda em threads de fundo;
@@ -42,6 +42,9 @@ from normaliza import normalizar  # noqa: E402
 MODEL_DIR = Path(os.environ.get("JARVIS_TTS_MODEL_DIR") or BASE / "models" / "kokoro-82m-bf16")
 VOICE_DIR = MODEL_DIR / "voices"
 DEFAULT_VOICE = os.environ.get("JARVIS_TTS_VOICE") or "pf_dora"
+DEFAULT_SPEED = float(os.environ.get("JARVIS_TTS_SPEED") or 1.15)
+if not 0.5 <= DEFAULT_SPEED <= 2.0:
+    raise SystemExit(f"JARVIS_TTS_SPEED={DEFAULT_SPEED} fora do intervalo 0.5 a 2.0")
 LANG_CODE = "p"  # pt-br (espeak-ng via misaki)
 MAX_TEXT = 4000
 MAX_BODY = 64 * 1024
@@ -328,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._reject(span, 400, "invalid_json", {"error": "JSON inválido"})
         text = req.get("text")
         voice = req.get("voice") or DEFAULT_VOICE
-        speed = req.get("speed", 1.0)
+        speed = req.get("speed", DEFAULT_SPEED)
         if not isinstance(text, str) or not text.strip():
             return self._reject(span, 400, "missing_text", {"error": "text obrigatório"})
         if len(text) > MAX_TEXT:
