@@ -4,7 +4,7 @@ import { PlatformError, SystemError } from "effect/PlatformError"
 import { HttpClient, HttpClientError, HttpClientResponse } from "effect/http"
 import { ChildProcess, ChildProcessSpawner } from "effect/process"
 import { TestClock } from "effect/testing"
-import { AFPLAY, LOCKF, MacVoice, MacVoiceConfig, SAY, SPEECH_TIMEOUT, SYNTHESIS_TIMEOUT } from "../src/index.ts"
+import { AFPLAY, LOCKF, MacVoice, MacVoiceConfig, QUEUE_TIMEOUT, SAY, speechTimeout, SYNTHESIS_TIMEOUT } from "../src/index.ts"
 
 interface Reply {
   readonly exitCode?: number
@@ -113,7 +113,7 @@ describe("MacVoice.speak through say", () => {
       assert.deepStrictEqual(command?.args, [
         "-k",
         "-t",
-        "90",
+        "120",
         LOCK,
         "/usr/bin/say",
         "-v",
@@ -151,11 +151,11 @@ describe("MacVoice.speak through say", () => {
     }).pipe(Effect.provide(fake.layer))
   })
 
-  it.effect("reports a lock held for 90 seconds as busy", () => {
+  it.effect("reports a lock held past the queue timeout as busy", () => {
     const fake = fakeSpawner({ exitCode: 75 })
     return Effect.gen(function*() {
       const error = yield* Effect.flip(speak("Olá"))
-      assert.match(error.message, /^Mac ocupado/)
+      assert.match(error.message, /^Mac ocupado: another program kept speaking for 2m\./)
       assert.strictEqual(fake.commands.length, 1)
     }).pipe(Effect.provide(fake.layer))
   })
@@ -168,17 +168,37 @@ describe("MacVoice.speak through say", () => {
     }).pipe(Effect.provide(fake.layer))
   })
 
-  it.effect("stops the process after 90 seconds", () => {
+  it("budgets the queue wait plus playback proportional to the text", () => {
+    assert.strictEqual(Duration.toSeconds(QUEUE_TIMEOUT), 120)
+    // 120 s of queue + 60 s of margin + 250 ms per character.
+    assert.strictEqual(Duration.toSeconds(speechTimeout("Olá")), 180.75)
+    // A maximal speech of 4000 characters (about 5 minutes of audio) gets 20 minutes.
+    assert.strictEqual(Duration.toSeconds(speechTimeout("a".repeat(4000))), 1180)
+  })
+
+  it.effect("does not cut a long speech after the old 90 seconds", () => {
+    const fake = fakeSpawner({ hang: true })
+    const text = "a".repeat(1500)
+    return Effect.gen(function*() {
+      const fiber = yield* Effect.forkChild(speak(text))
+      yield* TestClock.adjust(Duration.seconds(540))
+      assert.isUndefined(fiber.pollUnsafe())
+      assert.strictEqual(fake.state.released, 0)
+      yield* Fiber.interrupt(fiber)
+    }).pipe(Effect.provide(fake.layer))
+  })
+
+  it.effect("stops a stuck player only after the proportional budget", () => {
     const fake = fakeSpawner({ hang: true })
     return Effect.gen(function*() {
       const fiber = yield* Effect.forkChild(speak("Olá"))
-      yield* TestClock.adjust(Duration.subtract(SPEECH_TIMEOUT, Duration.millis(1)))
+      yield* TestClock.adjust(Duration.subtract(speechTimeout("Olá"), Duration.millis(1)))
       assert.isUndefined(fiber.pollUnsafe())
       yield* TestClock.adjust(Duration.millis(1))
       const exit = yield* Fiber.await(fiber)
       assert.isTrue(Exit.isFailure(exit))
       const error = yield* Effect.flip(Fiber.join(fiber))
-      assert.match(error.message, /did not finish within 1m 30s and was stopped/)
+      assert.match(error.message, /did not finish within 3m 750ms and was stopped/)
       // The process scope closed, so the spawner kills the process group.
       assert.strictEqual(fake.state.released, 1)
       assert.strictEqual(fake.commands.length, 1)
@@ -200,7 +220,7 @@ describe("MacVoice.speak through the TTS server", () => {
       const [command] = fake.commands
       assert.strictEqual(command?.command, "/usr/bin/lockf")
       assert.strictEqual(AFPLAY, "/usr/bin/afplay")
-      assert.deepStrictEqual(command?.args, ["-k", "-t", "90", LOCK, "/usr/bin/afplay", WAV_FILE])
+      assert.deepStrictEqual(command?.args, ["-k", "-t", "120", LOCK, "/usr/bin/afplay", WAV_FILE])
       assert.isUndefined(command?.options.shell)
       // The temporary WAV is removed once afplay exited.
       assert.deepStrictEqual(fake.removed, [WAV_FILE])
@@ -214,7 +234,7 @@ describe("MacVoice.speak through the TTS server", () => {
         yield* speak("Olá")
         assert.strictEqual(fake.requests.length, 1)
         assert.strictEqual(fake.commands.length, 1)
-        assert.deepStrictEqual(fake.commands[0]?.args, ["-k", "-t", "90", LOCK, SAY, "-v", "Luciana", "--", "Olá"])
+        assert.deepStrictEqual(fake.commands[0]?.args, ["-k", "-t", "120", LOCK, SAY, "-v", "Luciana", "--", "Olá"])
       }).pipe(Effect.provide(fake.layer))
     })
   }

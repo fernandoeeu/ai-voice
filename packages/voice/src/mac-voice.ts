@@ -7,8 +7,20 @@ import { MacVoiceError } from "./mac-voice-error.ts"
 export const LOCKF = "/usr/bin/lockf"
 export const SAY = "/usr/bin/say"
 export const AFPLAY = "/usr/bin/afplay"
-/** Covers both the wait for the lock and the playback itself; a longer speech is stopped. */
-export const SPEECH_TIMEOUT = Duration.seconds(90)
+/**
+ * Longest wait for the lock while another program speaks (`lockf -t`). When it expires nothing
+ * was spoken and lockf exits with EX_TEMPFAIL, reported as "Mac ocupado".
+ */
+export const QUEUE_TIMEOUT = Duration.seconds(120)
+/** Playback budget: a fixed margin plus a generous time per character (Portuguese speech runs at about 70 ms per character). */
+export const PLAYBACK_MARGIN = Duration.seconds(60)
+export const PLAYBACK_PER_CHARACTER = Duration.millis(250)
+/**
+ * Safety net for a stuck player, never for a long speech: the queue wait plus a playback budget
+ * proportional to the text, so a speech that started playing is not cut by it.
+ */
+export const speechTimeout = (text: string): Duration.Duration =>
+  Duration.sum(QUEUE_TIMEOUT, Duration.sum(PLAYBACK_MARGIN, Duration.times(PLAYBACK_PER_CHARACTER, text.length)))
 /** The TTS server gets one attempt of this long; after that the speech falls back to `say`. */
 export const SYNTHESIS_TIMEOUT = Duration.seconds(10)
 // SIGTERM first; a process that ignores it is SIGKILLed after this grace period.
@@ -20,7 +32,7 @@ const WAV_HEADER_LENGTH = 44
 
 export const MAX_TEXT_LENGTH = 4000
 
-const VOICE_BOUNDARIES_MS = [25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 8000, 10000, 15000, 30000, 60000, 90000]
+const VOICE_BOUNDARIES_MS = [25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 8000, 10000, 15000, 30000, 60000, 90000, 120000, 180000, 300000, 600000]
 
 /** One POST to the TTS server, by `resultado`: `ok`, or `falhou` when the speech fell back to `say`. */
 export const synthesisLatency = Metric.histogram("jarvis_voz_sintese_ms", {
@@ -76,14 +88,14 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
   const decode = Schema.decodeUnknownEffect(MacSpeechText)
 
   /**
-   * `lockf -k -t 90 <lock> <player...>`: lockf waits for every other program speaking through the
+   * `lockf -k -t 120 <lock> <player...>`: lockf waits up to QUEUE_TIMEOUT for every other program speaking through the
    * same file (such as `jarvis-fala`), then runs the player holding the lock until it exits. `-k`
    * keeps the file, because removing it would let a waiting process lock a deleted inode.
    */
   const locked = (player: ReadonlyArray<string>) =>
     ChildProcess.make(
       LOCKF,
-      ["-k", "-t", String(Duration.toSeconds(SPEECH_TIMEOUT)), config.lock, ...player],
+      ["-k", "-t", String(Duration.toSeconds(QUEUE_TIMEOUT)), config.lock, ...player],
       { stdin: "ignore", stdout: "ignore", stderr: "ignore", forceKillAfter: FORCE_KILL_AFTER }
     )
 
@@ -134,21 +146,23 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
 
   // A single attempt. The process lives only inside exitCode's scope: on timeout or
   // interruption the spawner kills its process group, lockf and the player included.
-  const play = Effect.fnUntraced(function*(command: ChildProcess.Command, player: string) {
+  const play = Effect.fnUntraced(function*(command: ChildProcess.Command, player: string, text: string) {
+    const timeout = speechTimeout(text)
     const code = yield* spawner.exitCode(command).pipe(
       Effect.catchTag("PlatformError", () => fail(`Could not run ${LOCKF} ${player}. Nothing was spoken.`)),
       Effect.timeoutOrElse({
-        duration: SPEECH_TIMEOUT,
+        duration: timeout,
         orElse: () =>
           fail(
-            `Speech on the Mac did not finish within ${Duration.format(SPEECH_TIMEOUT)} and was stopped. ` +
+            `Speech on the Mac did not finish within ${Duration.format(timeout)} and was stopped. ` +
               "Do not retry automatically."
           )
       })
     )
     if (code === EX_TEMPFAIL) {
       return yield* fail(
-        "Mac ocupado: another program kept speaking for 90 seconds. Nothing was spoken; do not retry automatically."
+        `Mac ocupado: another program kept speaking for ${Duration.format(QUEUE_TIMEOUT)}. ` +
+          "Nothing was spoken; do not retry automatically."
       )
     }
     if (code !== 0) {
@@ -160,14 +174,14 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
     }
   })
 
-  const playWav = (wav: Uint8Array) =>
+  const playWav = (wav: Uint8Array, text: string) =>
     Effect.scoped(Effect.gen(function*() {
       // Deleted when the scope closes, after afplay exited or was killed.
       const file = yield* fs.makeTempFileScoped({ prefix: "jarvis-tts-", suffix: ".wav" }).pipe(
         Effect.tap((file) => fs.writeFile(file, wav)),
         Effect.catchTag("PlatformError", () => fail("Could not write the synthesized audio. Nothing was spoken."))
       )
-      yield* play(locked([AFPLAY, file]), AFPLAY)
+      yield* play(locked([AFPLAY, file]), AFPLAY, text)
     }))
 
   const speak = Effect.fn("MacVoice.speak")(function*(input: string) {
@@ -188,8 +202,8 @@ const make = Effect.fnUntraced(function*(options: MacVoiceOptions = {}) {
     // The player starts right after synthesis, unless another speech holds the lock.
     yield* Metric.update(Metric.withAttributes(timeToAudio, { motor }), (yield* Clock.currentTimeMillis) - start)
     yield* Option.match(wav, {
-      onSome: playWav,
-      onNone: () => play(sayCommand(text), SAY)
+      onSome: (bytes) => playWav(bytes, text),
+      onNone: () => play(sayCommand(text), SAY, text)
     })
     yield* Metric.update(Metric.withAttributes(speechDuration, { motor }), (yield* Clock.currentTimeMillis) - start)
     return { status: "accepted", device: MAC_DEVICE, chunks: 1, playbackConfirmed: true } satisfies MacSpeechPlayed
