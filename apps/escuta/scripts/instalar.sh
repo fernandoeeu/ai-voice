@@ -22,6 +22,11 @@ if security find-identity -p codesigning 2>/dev/null | grep -q "\"$IDENTITY\""; 
 CONFIG="${JARVIS_CONFIG:-$HOME/.config/jarvis/jarvis.env}"
 # shellcheck disable=SC1090
 [ -f "$CONFIG" ] && . "$CONFIG"
+# Motor de reconhecimento: apple (padrão) ou parakeet (NVIDIA Parakeet TDT v3 local + VAD Silero).
+STT="${ESCUTA_STT:-apple}"
+# Com o Parakeet a VAD mede o silêncio e o texto final sai na hora: fecha a fala mais cedo.
+if [ "$STT" = "parakeet" ]; then SILENCIO_PADRAO=0.7; else SILENCIO_PADRAO=1.3; fi
+SILENCIO="${ESCUTA_SILENCIO:-$SILENCIO_PADRAO}"
 xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
 swift build -c release --package-path "$PKG"
@@ -52,7 +57,8 @@ cat > "$PLIST" <<EOF
   <key>WorkingDirectory</key><string>$STATE</string>
   <key>EnvironmentVariables</key>
   <dict>
-    <key>ESCUTA_SILENCIO</key><string>1.3</string>
+    <key>ESCUTA_STT</key><string>$(xml "$STT")</string>
+    <key>ESCUTA_SILENCIO</key><string>$(xml "$SILENCIO")</string>
     <key>ESCUTA_CONVERSA</key><string>8</string>
     <key>ESCUTA_SILENCIO_ABERTA</key><string>2.5</string>
     <key>ESCUTA_PANE</key><string>$(xml "${ESCUTA_PANE:-}")</string>

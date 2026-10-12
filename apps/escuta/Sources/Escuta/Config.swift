@@ -27,6 +27,10 @@ struct Config {
     /// Teste: depois do arquivo, segue alimentando silêncio por isto e sai.
     var trailingSilence: Double = 12
     var sound = true
+    /// Motor de reconhecimento: "apple" (SpeechAnalyzer) ou "parakeet" (NVIDIA Parakeet TDT v3 + VAD Silero).
+    var stt = "apple"
+    /// Parakeet: texto com confiança média abaixo disto é descartado (balbucio, TV, fala ao fundo).
+    var minConfidence: Double = 0.6
     var headless = false
 
     static func load(_ args: [String] = CommandLine.arguments, env: [String: String] = ProcessInfo.processInfo.environment) -> Config {
@@ -46,6 +50,8 @@ struct Config {
         if let v = env["ESCUTA_HERDR"], !v.isEmpty { c.herdr = v }
         if let v = env["ESCUTA_LOCK"], !v.isEmpty { c.speechLock = v }
         if let v = env["ESCUTA_SAIDA"], !v.isEmpty { c.outputFile = v }
+        if let v = num("ESCUTA_CONFIANCA_MIN") { c.minConfidence = v }
+        if let v = env["ESCUTA_STT"]?.lowercased(), !v.isEmpty { c.stt = v }
 
         var i = 1
         while i < args.count {
@@ -57,10 +63,17 @@ struct Config {
             case "--silencio-final": c.trailingSilence = next.flatMap(Double.init) ?? c.trailingSilence; i += 1
             case "--sem-som": c.sound = false
             case "--sem-interface": c.headless = true
+            case "--stt": c.stt = next?.lowercased() ?? c.stt; i += 1
             default: break
             }
             i += 1
         }
+        if !["apple", "parakeet"].contains(c.stt) {
+            logLine("ESCUTA_STT=\(c.stt) desconhecido; usando apple")
+            c.stt = "apple"
+        }
+        // O Parakeet devolve o texto final na hora e a VAD mede o silêncio de verdade: fecha a fala mais cedo.
+        if c.stt == "parakeet", num("ESCUTA_SILENCIO") == nil { c.endpoint.silence = 0.7 }
         return c
     }
 }

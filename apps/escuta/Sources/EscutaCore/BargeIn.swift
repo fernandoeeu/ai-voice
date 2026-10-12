@@ -12,7 +12,7 @@ public enum BargeIn {
 
     /// Ruído sem palavras: vazio, só pontuação ou só interjeições.
     public static func isNoise(_ text: String) -> Bool {
-        let fillers: Set<String> = ["hum", "hm", "hmm", "ah", "ahn", "eh", "uh", "oh", "you", "a", "e", "o"]
+        let fillers: Set<String> = ["hum", "hm", "hmm", "mm", "mmm", "mhm", "ah", "ahn", "eh", "uh", "oh", "you", "a", "e", "o"]
         return words(text).allSatisfy { fillers.contains($0) || $0.count < 2 }
     }
 

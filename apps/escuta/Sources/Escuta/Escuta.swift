@@ -86,7 +86,7 @@ final class Escuta: ObservableObject {
 
     let config: Config
     let router: Router
-    let recognizer = Recognizer()
+    let recognizer: SpeechEngine
     let gate = AudioGate()
     private let mic = MicCapture()
     private var converter: AVAudioConverter?   // só na thread de captura
@@ -123,12 +123,15 @@ final class Escuta: ObservableObject {
     init(config: Config) {
         self.config = config
         self.router = Router(config: config)
+        self.recognizer = SpeechEngines.make(config)
         // Status antigo do claude.jsonl não vale para os pedidos deste processo (os ids recomeçam em 1).
         let status = URL(fileURLWithPath: FileManager.default.currentDirectoryPath).appendingPathComponent("claude.jsonl")
         claudeOffset = (try? FileManager.default.attributesOfItem(atPath: status.path)[.size] as? UInt64) ?? 0
         recognizer.onEvent = { [weak self] e in MainActor.assumeIsolated { self?.onTranscript(e) } }
         recognizer.onState = { [weak self] s in self?.recognizerState = s }
         recognizer.onRestart = { [weak self] in self?.keepVolatileText() }
+        // Com VAD (Parakeet), o silêncio do fim de fala vem dela, não do volume do microfone.
+        recognizer.setVoiceHandler { [weak self] at in self?.lastVoiceAt = at }
         Task { @MainActor in await self.start() }
         Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
         Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.reportDiag() }
@@ -161,7 +164,9 @@ final class Escuta: ObservableObject {
             waitForMicPermission(); return
         }
         let speechAuth = SFSpeechRecognizer.authorizationStatus()
-        if speechAuth == .notDetermined {
+        if config.stt == "parakeet" {
+            logLine("reconhecimento: Parakeet TDT v3 local (sem o reconhecimento de fala da Apple)")
+        } else if speechAuth == .notDetermined {
             logLine("pedindo acesso ao reconhecimento de fala")
             let s = await withCheckedContinuation { c in SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0) } }
             logLine("reconhecimento de fala: \(s.rawValue)")
@@ -193,7 +198,7 @@ final class Escuta: ObservableObject {
         logLine("captura: \(formats)")
         audioStartedAt = Date()
         phase = .listening
-        emit(["type": "ready", "mic": micName, "wake_word": "jarvis", "locale": "pt-BR",
+        emit(["type": "ready", "mic": micName, "wake_word": "jarvis", "locale": "pt-BR", "stt": config.stt,
               "silence": config.endpoint.silence, "open_silence": config.endpoint.openSilence])
     }
 
@@ -226,7 +231,7 @@ final class Escuta: ObservableObject {
         let n = Int(out.frameLength)
         DispatchQueue.main.async {
             self.buffersIn += 1
-            if ok { self.framesOut += n; self.framesOutTotal += n } else { self.convErrors += 1 }
+            if ok { self.framesOut += n; self.framesOutTotal += n; self.outRate = fmt.sampleRate } else { self.convErrors += 1 }
         }
         if ok, n > 0 { recognizer.feed(out) }
     }
@@ -247,7 +252,7 @@ final class Escuta: ObservableObject {
         formats = "arquivo \(Int(src.sampleRate)) Hz → \(Int(fmt.sampleRate)) Hz"
         phase = .listening
         audioStartedAt = Date()
-        emit(["type": "ready", "mic": micName, "silence": config.endpoint.silence])
+        emit(["type": "ready", "mic": micName, "silence": config.endpoint.silence, "stt": config.stt])
         let chunk = AVAudioFrameCount(src.sampleRate / 10)
         var silenceLeft = Int(config.trailingSilence * 10)
         let q = DispatchQueue(label: "escuta.arquivo")
@@ -385,7 +390,7 @@ final class Escuta: ObservableObject {
             self.peakDB = max(self.peakDB, db)
             // Piso de ruído: desce rápido, sobe devagar. Voz = bem acima do piso.
             self.noiseFloor = db < self.noiseFloor ? db : min(db, self.noiseFloor + 0.05)
-            if db > -48, db > self.noiseFloor + 15 { self.lastVoiceAt = Date() }
+            if !self.recognizer.hasVAD, db > -48, db > self.noiseFloor + 15 { self.lastVoiceAt = Date() }
             self.levels.removeFirst()
             self.levels.append(level)
         }
@@ -505,12 +510,15 @@ final class Escuta: ObservableObject {
             let ms = Int(Date().timeIntervalSince(t0) * 1000)
             DispatchQueue.main.async {
                 logLine("interrompeu o Jarvis em \(ms) ms (ouviu \"\(owner)\"); processos encerrados: \(killed)")
-                emit(["type": "barge_in", "owner": owner, "heard": text, "killed": killed, "kill_ms": ms, "audio_s": Double(self.framesOutTotal) / 16000])
+                emit(["type": "barge_in", "owner": owner, "heard": text, "killed": killed, "kill_ms": ms, "audio_s": self.audioSeconds])
             }
         }
     }
 
     private var framesOutTotal = 0
+    private var outRate = 16000.0
+    /// Segundos de áudio já entregues ao reconhecedor (nos testes com arquivo, a posição no arquivo).
+    private var audioSeconds: Double { (Double(framesOutTotal) / outRate * 100).rounded() / 100 }
     private var segConfidences: [Double] = []
     private var liveConfidence: Double?
     private var voiceInUtterance = false
@@ -596,7 +604,8 @@ final class Escuta: ObservableObject {
             if lastVoiceAt > start.addingTimeInterval(-2.5) { voiceInUtterance = true }
             // Silêncio pelo medidor do microfone (tempo real). Se o medidor se confundir com ruído de fundo,
             // o texto parado também conta como silêncio, com 1,5 s de folga para o atraso do reconhecedor.
-            let silence = max(now.timeIntervalSince(lastVoiceAt), now.timeIntervalSince(lastTextChangeAt) - 1.5)
+            let silence = recognizer.hasVAD ? now.timeIntervalSince(lastVoiceAt)
+                : max(now.timeIntervalSince(lastVoiceAt), now.timeIntervalSince(lastTextChangeAt) - 1.5)
             let activityAt = now.addingTimeInterval(-silence)
             let sinceFinalize = finalizeAt.flatMap { $0 > activityAt && finalizeDone ? now.timeIntervalSince($0) : nil }
             let d = Endpoint.decide(text: whole, volatile: !livePartial.isEmpty, silence: silence,
@@ -654,7 +663,8 @@ final class Escuta: ObservableObject {
         heard.insert(Heard(at: Date(), text: text, wakeRange: d.wake, command: d.command), at: 0)
         if heard.count > 12 { heard.removeLast() }
         emit(["type": "heard", "text": text, "wake": d.wake != nil, "end": reason, "during_speech": wasOverlapped,
-              "confidence": utteranceConfidence ?? -1, "voice": voiceInUtterance, "sent": d.command != nil, "seconds": (duration * 10).rounded() / 10])
+              "confidence": utteranceConfidence ?? -1, "voice": voiceInUtterance, "sent": d.command != nil, "seconds": (duration * 10).rounded() / 10,
+              "audio_s": audioSeconds])
         if let c = d.command, !c.isEmpty { send(c) }
     }
 
@@ -668,7 +678,7 @@ final class Escuta: ObservableObject {
         commands.insert(Command(id: id, at: Date(), text: text, speechMs: speechMs), at: 0)
         if commands.count > 8 { commands.removeLast() }
         lastVoiceAtForCommand[id] = lastVoiceAt
-        emit(["type": "command", "id": id, "text": text])
+        emit(["type": "command", "id": id, "text": text, "speech_ms": speechMs, "audio_s": audioSeconds])
         setPhase(.sent, resetAfter: 20)
         router.q.async { [weak self] in
             guard let self else { return }
