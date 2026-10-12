@@ -865,6 +865,55 @@
       "description": "Do grokbot_send (pendente no outbox) até o grokbot_deliver."
     },
     {
+      "type": "timeseries",
+      "title": "Escuta: fim da fala → pedido chegou (p50 / p95)",
+      "id": 39,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.5, sum by (le) (rate(jarvis_escuta_latencia_fim_fala_ms_bucket[5m])))",
+          "legendFormat": "p50",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(jarvis_escuta_latencia_fim_fala_ms_bucket[5m])))",
+          "legendFormat": "p95",
+          "refId": "B"
+        }
+      ],
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "lineWidth": 2,
+            "fillOpacity": 8,
+            "showPoints": "never",
+            "spanNulls": true
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "options": {},
+      "description": "Espera entre o Fernando parar de falar e o pedido chegar ao destino: latency_ms dos routed com ok do escuta.events.jsonl (histograma jarvis_escuta_latencia_fim_fala_ms)."
+    },
+    {
       "type": "row",
       "title": "Grok Bot, callback e MCP",
       "id": 18,
@@ -873,7 +922,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 35
+        "y": 43
       }
     },
     {
@@ -901,7 +950,7 @@
         "h": 5,
         "w": 12,
         "x": 0,
-        "y": 36
+        "y": 44
       },
       "fieldConfig": {
         "defaults": {
@@ -951,7 +1000,7 @@
         "h": 5,
         "w": 12,
         "x": 12,
-        "y": 36
+        "y": 44
       },
       "fieldConfig": {
         "defaults": {
@@ -1011,7 +1060,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 41
+        "y": 49
       },
       "fieldConfig": {
         "defaults": {
@@ -1050,7 +1099,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 41
+        "y": 49
       },
       "fieldConfig": {
         "defaults": {
@@ -1093,7 +1142,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 57
       },
       "fieldConfig": {
         "defaults": {},
@@ -1146,7 +1195,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 57
       },
       "fieldConfig": {
         "defaults": {
@@ -1171,7 +1220,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 56
+        "y": 64
       }
     },
     {
@@ -1232,7 +1281,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 57
+        "y": 65
       },
       "fieldConfig": {
         "defaults": {
@@ -1315,7 +1364,7 @@
         "h": 6,
         "w": 16,
         "x": 8,
-        "y": 57
+        "y": 65
       },
       "fieldConfig": {
         "defaults": {
@@ -1395,7 +1444,7 @@
         "h": 7,
         "w": 12,
         "x": 0,
-        "y": 63
+        "y": 71
       },
       "fieldConfig": {
         "defaults": {
@@ -1434,7 +1483,7 @@
         "h": 7,
         "w": 12,
         "x": 12,
-        "y": 63
+        "y": 71
       },
       "fieldConfig": {
         "defaults": {
@@ -1459,7 +1508,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 70
+        "y": 78
       }
     },
     {
@@ -1485,7 +1534,7 @@
         "h": 8,
         "w": 8,
         "x": 0,
-        "y": 71
+        "y": 79
       },
       "fieldConfig": {
         "defaults": {
@@ -1533,7 +1582,7 @@
         "h": 8,
         "w": 8,
         "x": 8,
-        "y": 71
+        "y": 79
       },
       "fieldConfig": {
         "defaults": {
@@ -1607,7 +1656,7 @@
         "h": 8,
         "w": 8,
         "x": 16,
-        "y": 71
+        "y": 79
       },
       "fieldConfig": {
         "defaults": {
@@ -1658,7 +1707,7 @@
         "h": 7,
         "w": 8,
         "x": 0,
-        "y": 79
+        "y": 87
       },
       "fieldConfig": {
         "defaults": {
@@ -1715,7 +1764,7 @@
         "h": 7,
         "w": 8,
         "x": 8,
-        "y": 79
+        "y": 87
       },
       "fieldConfig": {
         "defaults": {
@@ -1763,7 +1812,7 @@
         "h": 7,
         "w": 8,
         "x": 16,
-        "y": 79
+        "y": 87
       },
       "fieldConfig": {
         "defaults": {
@@ -1805,7 +1854,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 86
+        "y": 94
       }
     },
     {
@@ -1830,7 +1879,7 @@
         "h": 10,
         "w": 24,
         "x": 0,
-        "y": 87
+        "y": 95
       },
       "fieldConfig": {
         "defaults": {},
