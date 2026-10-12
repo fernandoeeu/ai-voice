@@ -3,6 +3,7 @@ import { Option } from "effect"
 import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { DEFAULT_PORT } from "../src/config.ts"
 import { decidir } from "../src/entrega.ts"
 import { formatarEntrega, limparOrigem } from "../src/fila.ts"
 import { atualizarAuto, AUTO_FIM, AUTO_INICIO, ehMaestro, ehSessaoDoMaestro, renderizar, resumirTranscript } from "../src/memoria.ts"
@@ -125,5 +126,11 @@ describe("vigia", () => {
       "--resume", "abc", "--append-system-prompt-file", "/s.md", "--allowedTools", "Bash(/bin/fala:*)",
       "--settings", "/h.json"
     ])
+  })
+})
+
+describe("config", () => {
+  it("usa a 7353, fora das portas do Grafana (7351) e do coletor (7352)", () => {
+    expect(DEFAULT_PORT).toBe(7353)
   })
 })

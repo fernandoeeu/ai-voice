@@ -9,14 +9,14 @@
 #
 # Variáveis opcionais: JARVIS_MAESTRO_NOME (maestro), JARVIS_MAESTRO_DIR
 # (~/.local/share/jarvis/maestro), JARVIS_MAESTRO_WORKSPACE (o do maestro vivo),
-# JARVIS_EVENTOS_PORT (7351). Não toca no settings.json.
+# JARVIS_EVENTOS_PORT (7353). Não toca no settings.json.
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 BUN="$(command -v bun || echo "$HOME/.bun/bin/bun")"
 NOME="${JARVIS_MAESTRO_NOME:-maestro}"
 DIR="${JARVIS_MAESTRO_DIR:-$HOME/.local/share/jarvis/maestro}"
-PORT="${JARVIS_EVENTOS_PORT:-7351}"
+PORT="${JARVIS_EVENTOS_PORT:-7353}"
 HERDR="${JARVIS_HERDR:-$HOME/.local/bin/herdr}"
 # Os panes que o vigia cria ficam no workspace do maestro vivo (pelo rótulo, que sobrevive a um
 # reinício do herdr); sem maestro no ar, num workspace "maestro".

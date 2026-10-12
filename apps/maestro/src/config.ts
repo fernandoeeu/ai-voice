@@ -4,7 +4,8 @@ import { join } from "node:path"
 
 export const HOSTNAME = "127.0.0.1"
 
-export const DEFAULT_PORT = 7351
+// 7351 é do Grafana (jarvis-telemetria) e 7352 do coletor.
+export const DEFAULT_PORT = 7353
 
 const home = homedir()
 
