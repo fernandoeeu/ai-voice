@@ -23,6 +23,21 @@ Set these in the MCP client configuration that launches the server, or in the se
 | `AI_VOICE_HTTP_PORT` | unset (stdio) | When set, serves MCP over HTTP on `/mcp` instead of stdio. See [Serve Jarvis over the network](network.md). |
 | `AI_VOICE_HTTP_HOST` | `127.0.0.1` | Listen address in HTTP mode. |
 
+On a Mac, `scripts/setup.sh` keeps the values it installs with in `~/.config/jarvis/jarvis.env` and passes them to the LaunchAgents and to `claude mcp add`. See [Mac setup](setup.md#settings).
+
+### Voice server
+
+`services/tts/server.py`, installed by `scripts/setup.sh` into `~/.local/share/jarvis/tts` and run by the `dev.jarvis.tts` LaunchAgent, is what `AI_VOICE_TTS_URL` points at. It listens only on `127.0.0.1`.
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `JARVIS_TTS_PORT` | `7349` | Port of the server. Change `AI_VOICE_TTS_URL` with it. |
+| `JARVIS_TTS_MODEL_DIR` | `models/kokoro-82m-bf16` next to `server.py` | Kokoro model directory, with its `voices/` folder. |
+| `JARVIS_TTS_VOICE` | `pf_dora` | Voice used when a request names none. Also read by `fala-kokoro.sh`. |
+| `JARVIS_TTS_HOME` | `~/.local/share/jarvis/tts` | Where `services/tts/install.sh` installs the server, and where `jarvis-fala` looks for `fala-kokoro.sh`. |
+
+`GET /health` answers 200 once the model is loaded and warmed up, `GET /voices` lists the voices, and `POST /synthesize` takes `{"text", "voice", "speed"}` (up to 4000 characters, speed 0.5 to 2.0) and returns a WAV.
+
 ## Commands
 
 | Command | Effect |
