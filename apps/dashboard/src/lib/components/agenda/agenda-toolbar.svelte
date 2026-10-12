@@ -99,6 +99,11 @@
 		font-weight: 600;
 		text-decoration-color: var(--ink);
 	}
+	@media (pointer: coarse) {
+		.legend {
+			height: 2.75rem;
+		}
+	}
 	@media (hover: hover) and (pointer: fine) {
 		.legend:hover:not([aria-current='page']) {
 			background-color: var(--hover);

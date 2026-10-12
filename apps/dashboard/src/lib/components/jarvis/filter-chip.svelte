@@ -15,7 +15,7 @@
 	aria-current={current ? 'page' : undefined}
 	data-sveltekit-reset="false"
 	class={[
-		'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-medium whitespace-nowrap',
+		'inline-flex h-8 shrink-0 pointer-coarse:h-10 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] font-medium whitespace-nowrap',
 		'transition-[background-color,border-color,color,scale] duration-[var(--dur-fast)] ease-[var(--ease-out)] active:scale-[0.97]',
 		current
 			? 'border-ink bg-ink text-canvas'

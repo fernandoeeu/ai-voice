@@ -95,7 +95,7 @@
 	</aside>
 
 	<header
-		class="sticky top-0 z-20 flex h-13 items-center justify-between gap-3 border-b border-rule bg-chrome px-[var(--gutter)] md:hidden"
+		class="sticky top-0 z-20 flex h-[calc(3.25rem+env(safe-area-inset-top))] items-center justify-between gap-3 border-b border-rule bg-chrome pt-[env(safe-area-inset-top)] pr-[max(var(--gutter),env(safe-area-inset-right))] pl-[max(var(--gutter),env(safe-area-inset-left))] md:hidden"
 	>
 		<a href="/" class="flex items-center gap-2" aria-label="Jarvis, início">
 			{@render mark('size-5 text-brand')}
@@ -110,7 +110,7 @@
 	</header>
 
 	<main
-		class="min-w-0 px-[var(--gutter)] pt-6 pb-[calc(var(--tabbar-height)+2rem+env(safe-area-inset-bottom))] md:pt-10 md:pb-16"
+		class="min-w-0 pr-[max(var(--gutter),env(safe-area-inset-right))] pl-[max(var(--gutter),env(safe-area-inset-left))] pt-6 pb-[calc(var(--tabbar-height)+2rem+env(safe-area-inset-bottom))] md:pt-10 md:pb-16"
 	>
 		<div class="mx-auto w-full max-w-[var(--content-max)]">
 			{@render children()}

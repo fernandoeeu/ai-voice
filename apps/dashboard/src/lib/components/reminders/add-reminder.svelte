@@ -139,7 +139,7 @@
 				placeholder="Notas (opcional)"
 				aria-invalid={errors.notes ? 'true' : undefined}
 				aria-describedby={errors.notes ? 'reminder-notes-error' : undefined}
-				class="ruled block min-h-[3.5rem] w-full resize-y bg-transparent pt-0 pb-0 text-sm text-ink outline-none [field-sizing:content] placeholder:text-ink-soft/80 focus-visible:outline-none"
+				class="ruled block min-h-[3.5rem] w-full resize-y bg-transparent pt-0 pb-0 text-sm text-ink outline-none [field-sizing:content] pointer-coarse:text-[1rem] placeholder:text-ink-soft/80 focus-visible:outline-none"
 			></textarea>
 			{#if errors.notes}
 				<p id="reminder-notes-error" class="pt-1.5 text-sm font-medium text-alert">{errors.notes}</p>

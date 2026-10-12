@@ -277,6 +277,9 @@
 		-moz-osx-font-smoothing: grayscale;
 		text-rendering: optimizeLegibility;
 		-webkit-tap-highlight-color: transparent;
+		/* iPhone Safari would inflate text in landscape; the type scale is already sized for phones. */
+		-webkit-text-size-adjust: 100%;
+		text-size-adjust: 100%;
 		scrollbar-color: var(--rule-strong) transparent;
 		scrollbar-gutter: stable;
 	}
@@ -286,6 +289,8 @@
 		font-size: var(--text-body);
 		line-height: 1.55;
 		caret-color: var(--brand);
+		/* Nothing may scroll the page sideways on a phone; wide content scrolls inside its own box. */
+		overflow-x: clip;
 	}
 	h1,
 	h2,
@@ -512,6 +517,11 @@
 		background-color: var(--sunken);
 		box-shadow: none;
 	}
+	/* Touch: a 44px target, and 16px text so iPhone Safari does not zoom in on focus. */
+	@media (pointer: coarse) {
+		min-height: 2.75rem;
+		font-size: 1rem;
+	}
 }
 
 /* Segmented control: a sunk track with one raised option. Works for radios (label > input) and links (aria-current). */
@@ -559,6 +569,9 @@
 	&:has(input:disabled) {
 		cursor: not-allowed;
 		opacity: 0.5;
+	}
+	@media (pointer: coarse) {
+		padding-block: 0.625rem;
 	}
 }
 
