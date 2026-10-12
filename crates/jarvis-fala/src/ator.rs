@@ -8,7 +8,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use jarvis_audio::Saida;
 use jarvis_kokoro::Sintetizador;
-use jarvis_lock::{Esgotou, GuardaLock, Guardiao};
+use jarvis_lock::{ErroLock, GuardaLock, Guardiao};
 use jarvis_protocolo::{Escopo, Evento, FalaId, rc};
 use tokio::sync::{mpsc, oneshot, watch};
 use tokio::task::JoinHandle;
@@ -170,7 +170,7 @@ struct Ator<S, A, G> {
     proximo_id: u64,
     fila: VecDeque<Item>,
     atual: Option<Atual>,
-    adquirindo: Option<JoinHandle<Result<GuardaLock, Esgotou>>>,
+    adquirindo: Option<JoinHandle<Result<GuardaLock, ErroLock>>>,
     guarda: Option<GuardaLock>,
     lock_tx: watch::Sender<bool>,
 }
@@ -204,7 +204,7 @@ where
                     }
                 }, if self.adquirindo.is_some() => {
                     self.adquirindo = None;
-                    self.lock_adquirido(lock);
+                    self.lock_adquirido(lock).await;
                 },
                 () = async {
                     match morte {
@@ -235,7 +235,12 @@ where
                 self.fim(item, rc::PRAZO_FILA, None, Instant::now());
                 continue;
             }
-            if self.guarda.is_none() && self.adquirindo.is_none() {
+            if self.guarda.is_none() {
+                // Uma aquisicao antiga (de fala cancelada) carrega o prazo da
+                // outra: refaz com o prazo desta fala.
+                if let Some(h) = self.adquirindo.take() {
+                    h.abort();
+                }
                 let restante = item.prazo.saturating_sub(item.enfileirada.elapsed());
                 let g = self.guardiao.clone();
                 self.adquirindo = Some(tokio::spawn(async move { g.segurar(restante).await }));
@@ -336,18 +341,40 @@ where
         self.soltar_se_vazio();
     }
 
-    fn lock_adquirido(&mut self, r: Result<Result<GuardaLock, Esgotou>, tokio::task::JoinError>) {
+    async fn lock_adquirido(
+        &mut self,
+        r: Result<Result<GuardaLock, ErroLock>, tokio::task::JoinError>,
+    ) {
         match r {
             Ok(Ok(g)) => {
                 self.guarda = Some(g);
                 let _ = self.lock_tx.send(true);
             }
-            _ => {
+            // O guardiao morreu antes do "ok": a Escuta ja viu o arquivo e
+            // fez barge-in. Mesmo caminho do barge-in: 143 e fila limpa.
+            Ok(Err(ErroLock::Morreu)) => self.barge_in().await,
+            Ok(Err(ErroLock::Prazo)) => {
                 // Prazo do lock esgotado: a fala da vez responde 75.
                 if let Some(a) = self.atual.take() {
                     self.fim(a.item, rc::PRAZO_FILA, Some(&a.prog), a.inicio);
                 }
             }
+            // Nao deu para criar o guardiao (ou a tarefa caiu): erro, rc 1.
+            Ok(Err(ErroLock::Spawn(m))) => {
+                tracing::warn!("guardiao do lock: {m}");
+                self.falha_lock();
+            }
+            Err(e) => {
+                tracing::warn!("tarefa do guardiao caiu: {e}");
+                self.falha_lock();
+            }
+        }
+    }
+
+    /// Sem guardiao nao ha fala: a da vez responde rc 1.
+    fn falha_lock(&mut self) {
+        if let Some(a) = self.atual.take() {
+            self.fim(a.item, RC_ERRO, Some(&a.prog), a.inicio);
         }
     }
 

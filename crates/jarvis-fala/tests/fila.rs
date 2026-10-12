@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use jarvis_audio::{EventoSaida, Saida};
 use jarvis_fala::{Config, Escopo, Evento, FalaId, Fila, Pedido};
 use jarvis_kokoro::{Result as KResult, Sintetizador};
-use jarvis_lock::{Esgotou, GuardaLock, Guardiao};
+use jarvis_lock::{ErroLock, GuardaLock, Guardiao};
 use jarvis_protocolo::Pcm24k;
 use tokio::sync::{broadcast, mpsc, watch};
 
@@ -154,6 +154,11 @@ impl Saida for FakeSaida {
 #[derive(Default)]
 struct GuardInner {
     nunca: AtomicBool,
+    /// Morre antes do "ok" (`ErroLock::Morreu`).
+    morre: AtomicBool,
+    /// Falha ao criar o processo (`ErroLock::Spawn`).
+    spawn: AtomicBool,
+    prazos: Mutex<Vec<Duration>>,
     chamadas: AtomicU32,
     guardas: Mutex<Vec<watch::Sender<bool>>>,
 }
@@ -169,11 +174,18 @@ impl FakeGuardiao {
     }
 }
 impl Guardiao for FakeGuardiao {
-    async fn segurar(&self, prazo: Duration) -> Result<GuardaLock, Esgotou> {
+    async fn segurar(&self, prazo: Duration) -> Result<GuardaLock, ErroLock> {
         self.0.chamadas.fetch_add(1, SeqCst);
+        self.0.prazos.lock().unwrap().push(prazo);
+        if self.0.spawn.load(SeqCst) {
+            return Err(ErroLock::Spawn("binario inexistente".into()));
+        }
+        if self.0.morre.load(SeqCst) {
+            return Err(ErroLock::Morreu);
+        }
         if self.0.nunca.load(SeqCst) {
             tokio::time::sleep(prazo).await;
-            return Err(Esgotou);
+            return Err(ErroLock::Prazo);
         }
         let (tx, rx) = watch::channel(false);
         self.0.guardas.lock().unwrap().push(tx);
@@ -204,6 +216,10 @@ fn dir_temp() -> PathBuf {
 }
 
 fn cena(auto: Option<Duration>) -> Cena {
+    cena_com(auto, Config::default().margem_saida)
+}
+
+fn cena_com(auto: Option<Duration>, margem_saida: Duration) -> Cena {
     let dir = dir_temp();
     let say = dir.join("say.sh");
     std::fs::write(
@@ -223,6 +239,7 @@ fn cena(auto: Option<Duration>) -> Cena {
         say_exe: say,
         fala_log: dir.join("fala.log"),
         voz_mac: "Luciana".into(),
+        margem_saida,
         ..Config::default()
     };
     let (sint, saida, guard) = (
@@ -508,5 +525,80 @@ async fn linha_do_fala_log() {
             .strip_prefix("ttfa_ms=")
             .is_some_and(|p| p.parse::<u64>().is_ok()),
         "{linha}"
+    );
+}
+
+#[tokio::test]
+async fn watchdog_sem_esvaziou_da_rc_1_e_solta_o_lock() {
+    // A saida nunca esvazia (sem dispositivo): prazo = pendente + margem.
+    let c = cena_com(None, Duration::from_millis(100));
+    let (_, mut rx) = c.fila.falar(Pedido::novo(TEXTO3)).await.unwrap();
+    assert_eq!(rc_de(&ate_fim(&mut rx).await), 1);
+    assert!(c.saida.0.calares.load(SeqCst) >= 1, "nao calou a saida");
+    espera(|| c.guard.solto(0)).await;
+    let est = c.fila.estado().await.unwrap();
+    assert_eq!((est.falando, est.lock_preso), (None, false));
+}
+
+#[tokio::test]
+async fn erro_da_saida_antes_do_primeiro_som_encerra_com_rc_1() {
+    let c = cena_com(None, Duration::from_secs(30));
+    c.saida.0.bloquear.store(true, SeqCst); // nenhum som sai
+    let (_, mut rx) = c.fila.falar(Pedido::novo(TEXTO3)).await.unwrap();
+    espera(|| c.guard.0.chamadas.load(SeqCst) == 1).await;
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let _ = c.saida.0.tx.send(EventoSaida::Erro {
+        mensagem: "sem dispositivo".into(),
+    });
+    assert_eq!(rc_de(&ate_fim(&mut rx).await), 1);
+    espera(|| c.guard.solto(0)).await;
+}
+
+#[tokio::test]
+async fn guardiao_morto_antes_do_ok_e_barge_in_143_e_fila_limpa() {
+    let c = cena(None);
+    c.guard.0.morre.store(true, SeqCst);
+    let (_, mut ra) = c.fila.falar(Pedido::novo("Primeira.")).await.unwrap();
+    let (_, mut rb) = c.fila.falar(Pedido::novo("Segunda.")).await.unwrap();
+    let (_, mut rc) = c.fila.falar(Pedido::novo("Terceira.")).await.unwrap();
+    for r in [&mut ra, &mut rb, &mut rc] {
+        assert_eq!(rc_de(&ate_fim(r).await), 143);
+    }
+    let est = c.fila.estado().await.unwrap();
+    assert_eq!((est.falando, est.fila, est.lock_preso), (None, 0, false));
+}
+
+#[tokio::test]
+async fn falha_de_spawn_do_guardiao_da_rc_1() {
+    let c = cena(None);
+    c.guard.0.spawn.store(true, SeqCst);
+    let (_, mut rx) = c.fila.falar(Pedido::novo("Sem guardiao.")).await.unwrap();
+    assert_eq!(rc_de(&ate_fim(&mut rx).await), 1);
+}
+
+#[tokio::test]
+async fn prazo_da_fala_b_nao_herda_o_de_a() {
+    let c = cena(None);
+    c.guard.0.nunca.store(true, SeqCst);
+    let a = Pedido {
+        texto: "Fala A.".into(),
+        prazo_fila: Some(Duration::from_millis(300)),
+        ..Pedido::default()
+    };
+    let (_, mut ra) = c.fila.falar(a).await.unwrap();
+    espera(|| c.guard.0.chamadas.load(SeqCst) == 1).await;
+    let b = Pedido {
+        texto: "Fala B.".into(),
+        prazo_fila: Some(Duration::from_secs(60)),
+        ..Pedido::default()
+    };
+    let (_, _rb) = c.fila.falar(b).await.unwrap();
+    c.fila.calar(Escopo::Atual).await.unwrap();
+    assert_eq!(rc_de(&ate_fim(&mut ra).await), 143);
+    espera(|| c.guard.0.chamadas.load(SeqCst) == 2).await;
+    let prazos = c.guard.0.prazos.lock().unwrap().clone();
+    assert!(
+        prazos[1] > Duration::from_secs(30),
+        "B herdou o prazo de A: {prazos:?}"
     );
 }

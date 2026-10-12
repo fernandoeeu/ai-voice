@@ -19,6 +19,9 @@ pub struct Config {
     pub fade_ms: u32,
     /// Primeira fatia curta (primeiro som mais cedo).
     pub primeira_curta: bool,
+    /// Folga somada aos prazos da saida (`tocar` e `Esvaziou`); passado o
+    /// prazo a fala termina com rc 1 e o lock e solto.
+    pub margem_saida: Duration,
 }
 
 impl Default for Config {
@@ -35,6 +38,7 @@ impl Default for Config {
             fala_log: home.join(".local/share/jarvis/tts/logs/fala.log"),
             fade_ms: 30,
             primeira_curta: true,
+            margem_saida: Duration::from_secs(3),
         }
     }
 }

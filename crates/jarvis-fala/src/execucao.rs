@@ -1,7 +1,7 @@
 //! Execucao de uma fala: frases com lookahead de 1, fallback `say`.
 
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use jarvis_audio::{EventoSaida, Saida};
 use jarvis_kokoro::{Sintetizador, dividir_frases};
@@ -67,10 +67,36 @@ fn marca_primeiro_som(e: &Entrada, ms: u64) {
     }
 }
 
-async fn tocar<A: Saida + 'static>(saida: &Arc<A>, id: FalaId, pcm: Pcm24k, ultimo: bool) {
+/// Segundos de audio que o ring da saida guarda (`jarvis_audio::nucleo`).
+const RING_S: f64 = jarvis_audio::nucleo::SEGUNDOS_BUFFER as f64;
+
+/// Erros da saida tolerados numa fala (depois do primeiro som) antes de desistir.
+const MAX_ERROS_SAIDA: u32 = 3;
+
+/// Entrega o bloco a saida com prazo: `tocar` bloqueia por backpressure do ring
+/// e, sem dispositivo, nunca volta. O prazo e a duracao do bloco + o ring + a
+/// margem. Devolve `false` se estourou.
+async fn tocar<A: Saida + 'static>(
+    saida: &Arc<A>,
+    id: FalaId,
+    pcm: Pcm24k,
+    ultimo: bool,
+    margem: Duration,
+) -> bool {
     let saida = saida.clone();
-    // `tocar` pode bloquear por backpressure do ring buffer.
-    let _ = tokio::task::spawn_blocking(move || saida.tocar(id, pcm, ultimo)).await;
+    let prazo = Duration::from_secs_f64(pcm.duracao_s() + RING_S) + margem;
+    let h = tokio::task::spawn_blocking(move || saida.tocar(id, pcm, ultimo));
+    tokio::time::timeout(prazo, h).await.is_ok()
+}
+
+/// Falha da saida (sem dispositivo, erros em serie, `Esvaziou` que nao vem):
+/// corta o som que sobrou (e destrava `tocar` bloqueado) e devolve rc 1. Quem
+/// chama o ator solta o guardiao do lock ao ver o fim da fala.
+async fn falhar<S, A: Saida + 'static>(ctx: &Ctx<S, A>, motivo: &str) -> i32 {
+    tracing::warn!("saida travada ({motivo}): calando e encerrando com rc 1");
+    let (saida, fade) = (ctx.saida.clone(), ctx.cfg.fade_ms);
+    let _ = tokio::task::spawn_blocking(move || saida.calar(fade)).await;
+    crate::ator::RC_ERRO
 }
 
 /// Fala `texto` com o `say`. Devolve o rc.
@@ -103,6 +129,8 @@ async fn say<S, A>(ctx: &Ctx<S, A>, e: &Entrada, t0: Instant, texto: &str) -> i3
 struct Produzido {
     /// Texto que sobrou sem sintetizar (Kokoro falhou no meio).
     resto: Option<String>,
+    /// A saida nao aceitou um bloco no prazo.
+    travou: bool,
 }
 
 /// Roda a fala inteira e devolve o rc. Cancelavel por drop.
@@ -139,6 +167,7 @@ where
     };
 
     let id = e.id;
+    let margem = ctx.cfg.margem_saida;
     let produtor = async {
         let mut atual = p0;
         let mut i = 0;
@@ -152,13 +181,22 @@ where
                 p.audio_s += dur;
             }
             if ultimo {
-                tocar(&ctx.saida, id, atual, true).await;
-                return Produzido { resto: None };
+                let ok = tocar(&ctx.saida, id, atual, true, margem).await;
+                return Produzido {
+                    resto: None,
+                    travou: !ok,
+                };
             }
-            let (_, proxima) = tokio::join!(
-                tocar(&ctx.saida, id, atual, false),
+            let (ok, proxima) = tokio::join!(
+                tocar(&ctx.saida, id, atual, false, margem),
                 ctx.synth.sintetizar(&frases[i + 1], &e.voz, e.vel)
             );
+            if !ok {
+                return Produzido {
+                    resto: None,
+                    travou: true,
+                };
+            }
             match proxima {
                 Ok(pcm) => {
                     atual = pcm;
@@ -167,9 +205,10 @@ where
                 Err(err) => {
                     tracing::warn!("kokoro falhou na frase {}, say no resto: {err:#}", i + 2);
                     // Fecha o bloco com um pedaco vazio para a saida avisar `Esvaziou`.
-                    tocar(&ctx.saida, id, Pcm24k::new(Vec::new()), true).await;
+                    let ok = tocar(&ctx.saida, id, Pcm24k::new(Vec::new()), true, margem).await;
                     return Produzido {
                         resto: Some(frases[i + 1..].join(" ")),
+                        travou: !ok,
                     };
                 }
             }
@@ -179,16 +218,45 @@ where
 
     let mut produzido: Option<Produzido> = None;
     let mut esvaziou = false;
+    let mut erros = 0u32;
+    // Prazo do `Esvaziou`, armado quando o produtor termina: o que sobra no
+    // ring (no maximo `RING_S`) mais a margem.
+    let mut limite: Option<tokio::time::Instant> = None;
     while produzido.is_none() || !esvaziou {
         tokio::select! {
-            p = &mut produtor, if produzido.is_none() => produzido = Some(p),
+            p = &mut produtor, if produzido.is_none() => {
+                if p.travou {
+                    return falhar(&ctx, "tocar nao voltou no prazo").await;
+                }
+                let pendente = {
+                    let pr = e.prog.lock().unwrap_or_else(|x| x.into_inner());
+                    pr.audio_s.min(RING_S)
+                };
+                limite = Some(tokio::time::Instant::now() + Duration::from_secs_f64(pendente) + margem);
+                produzido = Some(p);
+            }
+            () = async {
+                match limite {
+                    Some(l) => tokio::time::sleep_until(l).await,
+                    None => std::future::pending().await,
+                }
+            }, if limite.is_some() && !esvaziou => {
+                return falhar(&ctx, "Esvaziou nao chegou no prazo").await;
+            }
             ev = eventos.recv() => match ev {
                 Ok(EventoSaida::PrimeiroSom { fala, hora_saida }) if fala == id => {
                     let ms = hora_saida.saturating_duration_since(t0).as_millis() as u64;
                     marca_primeiro_som(&e, ms);
                 }
                 Ok(EventoSaida::Esvaziou { fala }) if fala == id => esvaziou = true,
-                Ok(EventoSaida::Erro { mensagem }) => tracing::warn!("saida: {mensagem}"),
+                Ok(EventoSaida::Erro { mensagem }) => {
+                    tracing::warn!("saida: {mensagem}");
+                    erros += 1;
+                    let sem_som = e.prog.lock().unwrap_or_else(|x| x.into_inner()).ttfa_ms.is_none();
+                    if sem_som || erros >= MAX_ERROS_SAIDA {
+                        return falhar(&ctx, &mensagem).await;
+                    }
+                }
                 Ok(_) | Err(broadcast::error::RecvError::Lagged(_)) => {}
                 Err(broadcast::error::RecvError::Closed) => return crate::ator::RC_ERRO,
             },
