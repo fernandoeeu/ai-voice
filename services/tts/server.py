@@ -384,6 +384,9 @@ def main():
     if not VOICES:
         sys.exit(f"nenhuma voz pt-BR em {VOICE_DIR}")
     t0 = time.monotonic()
+    # Teto do cache de buffers do Metal (padrão: ilimitado, cresce até ~300 MB em repouso).
+    import mlx.core as mx
+    mx.set_cache_limit(int(os.environ.get("JARVIS_TTS_MLX_CACHE_MB") or 64) * 1024 * 1024)
     MODEL = load(str(MODEL_DIR))
     log.info("modelo carregado em %.2fs; vozes: %s", time.monotonic() - t0, ", ".join(VOICES))
     t0 = time.monotonic()
